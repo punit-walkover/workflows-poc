@@ -1,7 +1,7 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Post } from '@nestjs/common';
 import { one } from '../db';
 import { setupSheetsDemo } from './sheets-demo';
-import { catalog, embedToken, KNOWN_APPS, listConnections, listOptions, removeConnection, saveConnection } from './viasocket';
+import { builderToken, catalog, embedToken, KNOWN_APPS, listConnections, listOptions, removeConnection, saveConnection } from './viasocket';
 
 const fail = (e: any): never => { throw new BadRequestException(e?.message ?? String(e)); };
 
@@ -18,6 +18,9 @@ export class IntegrationsController {
 
   // The browser needs this to open viaSocket's connect popup; signed server-side.
   @Get('token') async token() { return { token: await embedToken().catch(fail) }; }
+
+  // For viaSocket's flow builder (window.openViasocket), where actions are built.
+  @Get('builder-token') builder() { try { return { token: builderToken() }; } catch (e) { return fail(e); } }
 
   @Post('connections')
   async connect(@Body() b: { service_id: string; auth_id: string; app_name?: string }) {

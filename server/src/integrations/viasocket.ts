@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
+import { createCipheriv, createDecipheriv, createHmac, randomBytes } from 'crypto';
 import axios from 'axios';
 import { ViaSocket } from 'viasocket-apps';
 import { one, q } from '../db';
@@ -19,6 +19,16 @@ export const KNOWN_APPS = [
 ];
 
 export const embedToken = () => user().token();
+
+// Token for the flow-builder embed (openViasocket). Signed like GTWY's ({ org_id, project_id, user_id });
+// unique_identifier is added so the builder and the Apps API see the same end user and connections.
+export function builderToken() {
+  if (!env('VIASOCKET_EMBED_SECRET')) throw new Error('viaSocket is not configured (VIASOCKET_* in .env)');
+  const uid = env('VIASOCKET_UID') || 'workflows-poc';
+  const seg = (o: object) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const body = `${seg({ alg: 'HS256', typ: 'JWT' })}.${seg({ org_id: env('VIASOCKET_ORG_ID'), project_id: env('VIASOCKET_PROJECT_ID'), user_id: uid, unique_identifier: uid })}`;
+  return `${body}.${createHmac('sha256', env('VIASOCKET_EMBED_SECRET')).update(body).digest('base64url')}`;
+}
 
 // script ids are credentials: stored encrypted, decrypted only to run an action.
 const key = () => Buffer.from(env('POC_ENCRYPTION_KEY'), 'hex');

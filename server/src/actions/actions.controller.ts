@@ -107,7 +107,7 @@ export class ActionsController {
   async fromFlow(@Body() f: FlowEvent) {
     if (!f?.id || !/^https:\/\/flow\.sokt\.io\/func\/[A-Za-z0-9_-]+$/.test(f.webhookurl ?? '')) throw new BadRequestException('not a viaSocket flow event');
     const cur = await one<ActionRow>('select * from action where via_flow_id = $1', [f.id]);
-    if (f.action === 'deleted' || f.status === 'deleted') {
+    if (f.action === 'deleted' || f.action === 'delete' || f.status === 'deleted') {
       if (!cur) return { ok: true };
       const used = await q(`select 1 from workflow where archived_at is null and $1 = any(action_keys)`, [cur.key]);
       await q(used.length ? `update action set enabled = false where key = $1` : `delete from action where key = $1`, [cur.key]);

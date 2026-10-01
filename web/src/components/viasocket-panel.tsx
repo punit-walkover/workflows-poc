@@ -1,68 +1,65 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { X } from 'lucide-react';
 import { api } from '@/lib/api';
 
-// viaSocket's embedded flow builder in a side panel. Each published flow becomes an action the AI can call.
-const SCRIPT = 'https://embed.viasocket.com/prod-embedcomponent.js';
-type Embed = { on: (e: 'flow', fn: (flow: any) => void) => void; destroy?: () => void };
-declare global { interface Window { viaSocket?: { mount: (o: { embedToken: string; parent: string | HTMLElement; config?: object }) => Embed } } }
+// viaSocket's flow builder, wired the way GTWY does it: the embed script is loaded once with a token,
+// window.openViasocket(flowId?, { embedToken, meta }) opens viaSocket's own panel, and results come back
+// as window messages. Each published flow becomes an action the AI can call.
+const SCRIPT_ID = 'viasocket-embed-main-script';
+const SCRIPT_SRC = 'https://embed.viasocket.com/prod-embedcomponent.js';
+const META = { type: 'tool', createFrom: 'workflows-poc' };
+const LAYOUT = { type: 'right_slider', width: '75', widthUnit: '%', height: '100', heightUnit: '%', backdrop: true };
 
-let loading: Promise<void> | null = null;
-const loadScript = () => (loading ??= new Promise<void>((resolve, reject) => {
-  if (window.viaSocket) return resolve();
-  const s = document.createElement('script');
-  s.src = SCRIPT;
-  s.onload = () => resolve();
-  s.onerror = () => { loading = null; reject(new Error('Could not load the viaSocket panel.')); };
-  document.body.appendChild(s);
-}));
+declare global { interface Window { openViasocket?: (flowId: string | undefined, opts: { embedToken: string; meta?: object }) => void } }
 
-export function ViaSocketPanel({ open, onClose, onSaved }: { open: boolean; onClose: () => void; onSaved: (msg: string) => void }) {
-  const host = useRef<HTMLDivElement>(null);
+export function useViaSocketBuilder(onSaved: (msg: string) => void) {
+  const [token, setToken] = useState('');
   const [error, setError] = useState('');
+  const saved = useRef(onSaved);
+  saved.current = onSaved;
 
+  // Load the embed script once, with the builder token on the tag.
   useEffect(() => {
-    if (!open) return;
-    let embed: Embed | null = null;
     let cancelled = false;
-    const save = async (flow: any) => {
-      if (!['published', 'updated', 'paused', 'deleted'].includes(flow?.action)) return; // drafts don't become actions
-      try {
-        const a = await api('/actions/from-flow', { method: 'POST', body: flow });
-        onSaved(flow.action === 'deleted' ? `Removed the action for “${flow.title}”.` : `@${a.key} is ready. Mention it in a workflow step.`);
-      } catch (e: any) { setError(e.message); }
-    };
-    (async () => {
-      try {
-        setError('');
-        const [{ token }] = await Promise.all([api<{ token: string }>('/integrations/token'), loadScript()]);
-        if (cancelled || !host.current || !window.viaSocket) return;
-        embed = window.viaSocket.mount({
-          embedToken: token, parent: host.current,
-          config: { pageheading: 'Action', pagesubheading: 'Build a tool the AI can call from a workflow step', chatbot: true, showEnabled: true },
-        });
-        embed.on('flow', save);
-      } catch (e: any) { setError(e.message); }
-    })();
-    return () => { cancelled = true; embed?.destroy?.(); if (host.current) host.current.innerHTML = ''; };
-  }, [open, onSaved]);
+    api<{ token: string }>('/integrations/builder-token').then(({ token }) => {
+      if (cancelled) return;
+      setToken(token);
+      if (document.getElementById(SCRIPT_ID)) return;
+      const s = document.createElement('script');
+      s.id = SCRIPT_ID;
+      s.src = SCRIPT_SRC;
+      s.setAttribute('embedToken', token);
+      // Overrides the project's dashboard layout: a right-hand slider with viaSocket's own close / fullscreen header.
+      s.setAttribute('config', JSON.stringify(LAYOUT));
+      s.onerror = () => setError('Could not load the viaSocket builder.');
+      document.body.appendChild(s);
+    }).catch((e) => setError(e.message));
+    return () => { cancelled = true; };
+  }, []);
 
-  if (!open) return null;
-  return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-black/20" onClick={onClose}>
-      <aside className="flex h-full w-[min(760px,100vw)] flex-col bg-panel shadow-2xl" onClick={(e) => e.stopPropagation()}>
-        <header className="flex items-center gap-3 border-b border-line px-5 py-3">
-          <div className="flex-1">
-            <div className="font-medium">Build an action in viaSocket</div>
-            <div className="text-xs text-ink-3">Pick an app and what it should do, then publish. It shows up in your actions list.</div>
-          </div>
-          <button onClick={onClose} aria-label="Close" className="rounded p-1.5 text-ink-3 hover:bg-hover hover:text-ink"><X size={18} /></button>
-        </header>
-        {error && <div className="m-4 rounded-lg bg-bad-soft px-3 py-2 text-bad">{error}</div>}
-        <div ref={host} className="min-h-0 flex-1 overflow-auto" />
-      </aside>
-    </div>
-  );
+  // Flow events: only ours (meta.type 'tool') and only ones with a run URL.
+  useEffect(() => {
+    const onMessage = async (e: MessageEvent) => {
+      const f = e.data;
+      if (f?.metadata?.type !== 'tool' || !f?.webhookurl) return;
+      if (!['published', 'updated', 'paused', 'deleted', 'delete'].includes(f.action)) return; // drafts don't become actions
+      try {
+        const a = await api('/actions/from-flow', { method: 'POST', body: f });
+        saved.current(f.action.startsWith('delete') ? `Removed the action for “${f.title}”.`
+          : f.action === 'paused' ? `@${a.key} is paused in viaSocket, so it's turned off here.`
+          : `@${a.key} is ready. Mention it in a workflow step.`);
+      } catch (err: any) { setError(err.message); }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, []);
+
+  // New action: no flow id. Edit: the flow id stored on the action.
+  const open = (flowId?: string) => {
+    if (!token || typeof window.openViasocket !== 'function') return setError('The viaSocket builder is still loading. Try again in a moment.');
+    setError('');
+    window.openViasocket(flowId, { embedToken: token, meta: META });
+  };
+  return { open, error, ready: !!token };
 }

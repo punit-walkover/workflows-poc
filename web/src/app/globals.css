@@ -27,6 +27,9 @@
 
 html, body { background: var(--color-canvas); color: var(--color-ink); }
 
+/* viaSocket's builder slider sits above the app (as in GTWY). */
+#iframe-viasocket-embed-parent-container { z-index: 999999; }
+
 /* TipTap step editor */
 .step-editor .ProseMirror { outline: none; min-height: 1.5rem; line-height: 1.6; }
 .step-editor .ProseMirror p { margin: 0; }
