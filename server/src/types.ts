@@ -27,6 +27,7 @@ export interface ActionRow {
   input_template: Record<string, unknown> | null;
   via_flow_id: string | null;
   via_flow_url: string | null;
+  details_edited: boolean;
 }
 
 export type RunStatus =

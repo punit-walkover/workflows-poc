@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { Button, Card, Toggle } from '@/components/ui';
-import { useViaSocketBuilder } from '@/components/viasocket-panel';
+import { ToolDialog, type Tool } from '@/components/viasocket-panel';
 
 interface Action {
   key: string; name: string; description: string; kind: string; source: 'builtin' | 'mock' | 'viasocket' | 'viasocket_flow';
@@ -13,15 +13,13 @@ interface Action {
 
 const SOURCE: Record<string, string> = { builtin: 'built-in', mock: 'mock shop', viasocket: 'viaSocket app action', viasocket_flow: 'viaSocket' };
 
-// Tools are created only in viaSocket's builder; each published flow becomes an @action here.
+// Tools are created in the tool dialog: viaSocket's builder plus our details. Each published tool becomes an @action here.
 export default function ActionsPage() {
   const [rows, setRows] = useState<Action[]>([]);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
   const load = useCallback(() => api<Action[]>('/actions').then(setRows), []);
   useEffect(() => { load(); }, [load]);
-  const onSaved = useCallback((msg: string) => { setNotice(msg); load(); }, [load]);
-  const builder = useViaSocketBuilder(onSaved);
+  const [dialog, setDialog] = useState<{ tool: Tool | null } | null>(null);
 
   const patch = async (key: string, body: object) => {
     const updated = await api<Action>(`/actions/${key}`, { method: 'PATCH', body });
@@ -39,10 +37,9 @@ export default function ActionsPage() {
           <h1 className="text-xl font-semibold">Actions</h1>
           <p className="text-ink-2">Tools workflows can mention with <span className="chip chip-action">@key</span>. Build them in viaSocket: pick apps, wire the steps, go live.</p>
         </div>
-        <Button variant="primary" disabled={!builder.ready} onClick={() => builder.open()}><Plus size={15} /> New tool</Button>
+        <Button variant="primary" onClick={() => setDialog({ tool: null })}><Plus size={15} /> New tool</Button>
       </div>
-      {notice && <div className="mb-4 rounded-lg bg-ok-soft px-3 py-2 text-ok">{notice}</div>}
-      {(error || builder.error) && <div className="mb-4 rounded-lg bg-bad-soft px-3 py-2 text-bad">{error || builder.error}</div>}
+      {error && <div className="mb-4 rounded-lg bg-bad-soft px-3 py-2 text-bad">{error}</div>}
       <div className="space-y-3">
         {rows.map((a) => (
           <Card key={a.key} className="px-5 py-4">
@@ -62,7 +59,7 @@ export default function ActionsPage() {
                 )}
               </div>
               <div className="flex items-center gap-1">
-                {a.source === 'viasocket_flow' && <button title="Edit in viaSocket" onClick={() => builder.open(a.via_flow_id ?? undefined)} className="rounded p-1.5 text-ink-3 hover:bg-hover hover:text-ink"><Pencil size={15} /></button>}
+                {a.source === 'viasocket_flow' && <button title="Edit tool" onClick={() => setDialog({ tool: a })} className="rounded p-1.5 text-ink-3 hover:bg-hover hover:text-ink"><Pencil size={15} /></button>}
                 {(a.source === 'viasocket' || a.source === 'viasocket_flow') &&
                   <button title="Delete" onClick={() => remove(a.key)} className="rounded p-1.5 text-ink-3 hover:bg-hover hover:text-bad"><Trash2 size={15} /></button>}
                 <Toggle on={a.enabled} onChange={(v) => patch(a.key, { enabled: v })} />
@@ -71,6 +68,7 @@ export default function ActionsPage() {
           </Card>
         ))}
       </div>
+      {dialog && <ToolDialog tool={dialog.tool} onClose={() => setDialog(null)} onChanged={load} />}
     </div>
   );
 }

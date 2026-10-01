@@ -38,11 +38,27 @@ export class ActionsController {
     return a;
   }
 
+  // Switches from the list, and the tool dialog's details (new @key, name, description).
   @Patch(':key')
-  async patch(@Param('key') key: string, @Body() b: { enabled?: boolean; requires_approval?: boolean }) {
-    await q(`update action set enabled = coalesce($2, enabled), requires_approval = coalesce($3, requires_approval) where key = $1`,
-      [key, b.enabled ?? null, b.requires_approval ?? null]);
-    return this.get(key);
+  async patch(@Param('key') key: string, @Body() b: { enabled?: boolean; requires_approval?: boolean; new_key?: string; name?: string; description?: string }) {
+    const cur = await this.get(key);
+    const next = b.new_key?.trim();
+    if (next && next !== key) {
+      if (!/^[a-z][a-z0-9_]{1,47}$/.test(next)) throw new BadRequestException('@name: lowercase letters, digits and _, starting with a letter (2-48)');
+      if (await one('select 1 from action where key = $1', [next])) throw new BadRequestException(`@${next} already exists`);
+      // Workflow steps mention the key, so renaming is only safe before any workflow uses it.
+      const used = await q(`select name from workflow where archived_at is null and $1 = any(action_keys)
+                            union select name from workflow_version where $1 = any(action_keys)`, [key]);
+      if (used.length) throw new BadRequestException(`@${key} is used by ${[...new Set(used.map((w) => w.name))].join(', ')}; remove it there to rename`);
+    }
+    if (b.name !== undefined && !b.name.trim()) throw new BadRequestException('name is required');
+    if (b.description !== undefined && !b.description.trim()) throw new BadRequestException('description is required');
+    const details = b.name !== undefined || b.description !== undefined;
+    await q(`update action set enabled = coalesce($2, enabled), requires_approval = coalesce($3, requires_approval),
+               name = coalesce($4, name), description = coalesce($5, description), details_edited = details_edited or $6,
+               key = coalesce($7, key) where key = $1`,
+      [key, b.enabled ?? null, b.requires_approval ?? null, b.name?.trim() ?? null, b.description?.trim() ?? null, details, next || null]);
+    return this.get(next || cur.key);
   }
 
   @Delete(':key')
@@ -69,7 +85,10 @@ export class ActionsController {
     const description = (tool?.description || f.description || f.title || 'viaSocket flow').trim();
     const enabled = f.status !== 'paused' && f.action !== 'paused';
     if (cur) {
-      await q(`update action set name = $2, description = $3, input_schema = $4, via_flow_url = $5, enabled = $6 where key = $1`,
+      // Inputs and URL always follow the flow; name and description only until someone edits them here.
+      await q(`update action set input_schema = $4, via_flow_url = $5, enabled = $6,
+                 name = case when details_edited then name else $2 end, description = case when details_edited then description else $3 end
+               where key = $1`,
         [cur.key, f.title || cur.name, description, JSON.stringify(schema), f.webhookurl, enabled]);
       return this.get(cur.key);
     }
