@@ -69,6 +69,14 @@ export async function runAppAction(serviceId: string, actionVersionId: string, i
   return runAction((await connection(serviceId)).scriptId, actionVersionId, inputData);
 }
 
+// A flow built in the embedded viaSocket panel: POST the AI's args to its run URL (the URL is the credential).
+export async function runFlow(url: string, args: Record<string, unknown>) {
+  if (!/^https:\/\/flow\.sokt\.io\/func\/[A-Za-z0-9_-]+$/.test(url)) throw new Error('not a viaSocket flow URL');
+  const r = await axios.post(url, args, { timeout: 60_000, validateStatus: () => true });
+  if (r.status >= 400) throw new Error(`flow failed (${r.status}): ${JSON.stringify(r.data).slice(0, 300)}`);
+  return r.data ?? {};
+}
+
 export async function listOptions(serviceId: string, actionVersionId: string, fieldKey: string, existingFields: Record<string, unknown>) {
   const c = await connection(serviceId);
   return user().listOptions(actionVersionId, { fieldKey, authId: c.authId, existingFields });

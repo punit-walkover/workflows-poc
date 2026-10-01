@@ -52,7 +52,11 @@ Or use the `workflows-poc-server` / `workflows-poc-web` entries in `.claude/laun
 
 ## Custom actions through viaSocket (Google Sheets first)
 
-**Actions → Connected apps → Connect** opens viaSocket's consent popup.
+The Actions area has two tabs: **Actions** (the list, plus ways to add one) and **Connections** (connected apps and the Sheets demo).
+
+**Build in viaSocket** opens viaSocket's embedded flow builder (`viaSocket.mount`, `components/viasocket-panel.tsx`) in a side panel. When a flow is published or updated, its `openaiToolJson` becomes an action (`source = viasocket_flow`, `POST /actions/from-flow`). The AI's args are POSTed to the flow's run URL. New flow actions start with **Needs approval** on. Pausing a flow disables its action; deleting it removes the action (or disables it if a workflow uses it).
+
+**Actions → Connections → Connect** opens viaSocket's consent popup.
 - The server calls `findEnabled`/`enable` and stores the `script_id` AES-GCM-encrypted (`app_connection`).
 - The POC is its own viaSocket end user (`VIASOCKET_UID=workflows-poc`) on ticket0-b's org and project.
 

@@ -19,12 +19,14 @@ export interface ActionRow {
   amount_field: string | null;
   requires_approval: boolean;
   enabled: boolean;
-  source: 'builtin' | 'mock' | 'viasocket';
+  source: 'builtin' | 'mock' | 'viasocket' | 'viasocket_flow';
   via_service_id: string | null;
   via_app_name: string | null;
   via_action_version_id: string | null;
   via_action_name: string | null;
   input_template: Record<string, unknown> | null;
+  via_flow_id: string | null;
+  via_flow_url: string | null;
 }
 
 export type RunStatus =
