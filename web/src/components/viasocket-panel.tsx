@@ -76,7 +76,9 @@ export function ToolDialog({ tool: initial, onClose, onChanged }: { tool: Tool |
       try {
         const [{ token }] = await Promise.all([api<{ token: string }>('/integrations/builder-token'), loadScript()]);
         if (cancelled || !host.current || !window.viaSocket) return;
-        embed = window.viaSocket.mount({ embedToken: token, parent: host.current, config: { pageheading: 'Tool' },
+        // New tools: directFlow shows "Customized Tools → Add new Custom Tool" (a flow with specific, configured app
+        // actions) next to the app-as-AI-tool option. It also starts a draft flow, so editing doesn't use it.
+        embed = window.viaSocket.mount({ embedToken: token, parent: host.current, config: { pageheading: 'Tool', ...(initial ? {} : { directFlow: true }) },
                                          open: { flowId: flowToOpen(initial), meta: META } });
         embed.on('flow', async (f) => {
           if (!['published', 'updated', 'paused', 'deleted', 'delete'].includes(f?.action) || !f.webhookurl) return; // drafts stay drafts
