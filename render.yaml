@@ -1,0 +1,70 @@
+# Render Blueprint: Postgres + API (NestJS + DBOS) + web (Next.js).
+# Render → New → Blueprint → pick this repo. It asks for the secrets marked sync: false.
+databases:
+  - name: workflows-poc-db
+    databaseName: workflows_poc
+    plan: free
+
+services:
+  - type: web
+    name: workflows-poc-api
+    runtime: node
+    rootDir: server
+    plan: free
+    buildCommand: npm ci && npm run build
+    # Migrations run on every start (each file applies once); DBOS creates its own "dbos" schema.
+    startCommand: npm run db:setup && npm start
+    healthCheckPath: /actions
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: DATABASE_URL
+        fromDatabase:
+          name: workflows-poc-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        value: https://workflows-poc-web.onrender.com
+      - key: GTWY_DB_BASE_URL
+        value: https://db.gtwy.ai
+      - key: GTWY_SERVICE
+        value: openai
+      - key: GTWY_MODEL
+        value: gpt-4.1-mini
+      - key: REMIND_AFTER_SEC
+        value: "120"
+      - key: EXPIRE_AFTER_SEC
+        value: "600"
+      - key: APPROVAL_TIMEOUT_SEC
+        value: "1800"
+      - key: VIASOCKET_UID
+        value: workflows-poc
+      - key: GTWY_ORG_ID
+        sync: false
+      - key: GTWY_FOLDER_ID
+        sync: false
+      - key: GTWY_ACCESS_KEY
+        sync: false
+      - key: VIASOCKET_ORG_ID
+        sync: false
+      - key: VIASOCKET_PROJECT_ID
+        sync: false
+      - key: VIASOCKET_EMBED_SECRET
+        sync: false
+      - key: POC_ENCRYPTION_KEY
+        sync: false
+
+  - type: web
+    name: workflows-poc-web
+    runtime: node
+    rootDir: web
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npx next start -p $PORT -H 0.0.0.0
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Browser calls go to /api on this site; Next forwards them to the API service.
+      - key: NEXT_PUBLIC_API_URL
+        value: /api
+      - key: API_ORIGIN
+        value: https://workflows-poc-api.onrender.com

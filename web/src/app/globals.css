@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+/* Ticket0-style tokens: warm canvas, black primary, orange reserved for conditions/brand. */
+@theme {
+  --color-canvas: #f5f5f2;
+  --color-panel: #ffffff;
+  --color-line: #e6e6e2;
+  --color-ink: #1a1a1a;
+  --color-ink-2: #5c5c5c;
+  --color-ink-3: #8a8a85;
+  --color-hover: #efefec;
+  --color-brand: #e8420c;
+  --color-brand-soft: #fdf1ea;
+  --color-action: #2a5bd7;
+  --color-link: #2a5bd7;
+  --color-action-soft: #eaf0fd;
+  --color-var: #7a3fd0;
+  --color-var-soft: #f2ebfd;
+  --color-ok: #0b7a3b;
+  --color-ok-soft: #d4f5dc;
+  --color-warn: #b7791f;
+  --color-warn-soft: #fcefc7;
+  --color-bad: #b3261e;
+  --color-bad-soft: #fbe3e1;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Inter, sans-serif;
+}
+
+html, body { background: var(--color-canvas); color: var(--color-ink); }
+
+/* TipTap step editor */
+.step-editor .ProseMirror { outline: none; min-height: 1.5rem; line-height: 1.6; }
+.step-editor .ProseMirror p { margin: 0; }
+.step-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder); color: var(--color-ink-3); float: left; height: 0; pointer-events: none;
+}
+.chip { border-radius: 6px; padding: 1px 6px; margin: 0 1px; font-size: 0.9em; white-space: nowrap; }
+.chip-action { background: var(--color-action-soft); color: var(--color-action); }
+.chip-var { background: var(--color-var-soft); color: var(--color-var); }
+.chip-missing { background: var(--color-warn-soft); color: var(--color-warn); }

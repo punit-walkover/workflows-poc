@@ -1,0 +1,35 @@
+{
+  "name": "workflows-poc-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 4000",
+    "build": "next build",
+    "start": "next start -p 4000",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-document": "^3.31.3",
+    "@tiptap/extension-mention": "^3.31.3",
+    "@tiptap/extension-paragraph": "^3.31.3",
+    "@tiptap/extension-text": "^3.31.3",
+    "@tiptap/extensions": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3",
+    "@tiptap/suggestion": "^3.31.3",
+    "lucide-react": "^1.46.0",
+    "next": "16.3.5",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "viasocket-apps": "^0.1.2"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}
