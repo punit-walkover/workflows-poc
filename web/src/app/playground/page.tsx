@@ -226,8 +226,7 @@ function Label({ who, at, extra }: { who: keyof typeof WHO; at?: string; extra?:
 
 function EmptyState() {
   const [orders, setOrders] = useState<any[]>([]);
-  const [sheet, setSheet] = useState<any>(null);
-  useEffect(() => { api('/orders').then(setOrders); api('/integrations/apps').then((r) => setSheet(r.sheets_demo)); }, []);
+  useEffect(() => { api('/orders').then(setOrders); }, []);
   return (
     <div className="flex-1 overflow-auto p-10">
       <div className="mx-auto max-w-2xl">
@@ -240,12 +239,6 @@ function EmptyState() {
             <li>As Alex: “I want my money back for order 4513.” (outside the 30-day window, so it escalates)</li>
             <li>As Sam: “Refund my blender please, order 4600.” (refunds need approval: the chat gets a red dot, open it and approve)</li>
           </ul>
-          {sheet && (
-            <div className="mt-3 border-t border-line pt-3 text-ink-2">
-              <b>Google Sheets demo is on:</b> refunds now use the <a className="text-link underline" href={sheet.url} target="_blank" rel="noreferrer">Orders sheet</a>.
-              Try as Alex: “I want a refund for order 5001, the headphones stopped working.” Orders: {sheet.orders.map((o: any) => `${o.order_id} (${o.customer_email.split('@')[0]}, ${o.item})`).join(', ')}.
-            </div>
-          )}
         </div>
         <div className="rounded-xl border border-line bg-panel">
           <div className="flex items-center justify-between border-b border-line px-4 py-2">

@@ -26,7 +26,7 @@ Or use the `workflows-poc-server` / `workflows-poc-web` entries in `.claude/laun
 
 - On first boot the server publishes two templates: **Order refund** and **Damaged item return**.
 - It also creates its own GTWY agent, stored in `app_setting`.
-- `npm run smoke -- damaged|approval|escalate|sheets` drives a full conversation through the API.
+- `npm run smoke -- damaged|approval|escalate` drives a full conversation through the API.
 
 ## Demo scenarios (mock shop)
 
@@ -50,35 +50,14 @@ Or use the `workflows-poc-server` / `workflows-poc-web` entries in `.claude/laun
 - **Exactly-once actions** (`actions/execute.ts`): `action_run.idempotency_key = <run>:<node>:<visit>` plus a row lock (a Go to step re-run is a new visit), so a crash mid-refund can't refund twice.
 - **Audit**: `run_event` (the timeline) and `action_run` (every action, its mode and approval) answer "why was this refunded".
 
-## Custom actions through viaSocket (Google Sheets first)
+## Tools through viaSocket
 
-The Actions area has two tabs: **Actions** (the list, plus ways to add one) and **Connections** (connected apps and the Sheets demo).
-
-**Build in viaSocket** opens viaSocket's embedded flow builder (`viaSocket.mount`, `components/viasocket-panel.tsx`) in a side panel. When a flow is published or updated, its `openaiToolJson` becomes an action (`source = viasocket_flow`, `POST /actions/from-flow`). The AI's args are POSTed to the flow's run URL. New flow actions start with **Needs approval** on. Pausing a flow disables its action; deleting it removes the action (or disables it if a workflow uses it).
-
-**Actions → Connections → Connect** opens viaSocket's consent popup.
-- The server calls `findEnabled`/`enable` and stores the `script_id` AES-GCM-encrypted (`app_connection`).
-- The POC is its own viaSocket end user (`VIASOCKET_UID=workflows-poc`) on ticket0-b's org and project.
-
-**Set up demo sheet** (shown once Google Sheets is connected) does four things:
-1. Creates an *Orders* spreadsheet in your Drive: orders 5001–5004, with a live `days_since_delivery` formula.
-2. Creates `@sheet_lookup_order` (Lookup Spreadsheet Rows).
-3. Creates `@sheet_refund_order` (Update Spreadsheet Row: `refunded_minor`, `refund_status`, `refund_reason`).
-4. Publishes **Order refund (Google Sheets)** and turns the mock *Order refund* workflow off, so routing isn't ambiguous.
-
-**New action** builder (`/actions/new`):
-1. Pick an app. Any viaSocket app can be added by service id.
-2. Pick an app action from viaSocket's catalogue.
-3. Declare the arguments the AI fills.
-4. Edit the input template (`inputData` with `{{args.name}}` placeholders). The fields panel loads live options (`listOptions`) and inserts values or argument references.
-5. Set kind, subject and amount arguments, and whether it **needs approval**.
-6. Save, then **Run test** with sample arguments.
-
-**At runtime** a viaSocket action renders its template with the model's arguments and calls `runAction` inside the same `action_run` lock as the mock actions.
-
-Smoke test after the demo setup: `npm run smoke -- sheets`.
-
-Catalogue source: `POST https://flow.sokt.io/func/scriolZue69X {"service_id": …}` (as documented in `ticket0-b/docs/modules/ticket.md`). Google Sheets is `rowqm5xi2`.
+Tools are created only in viaSocket's own builder, opened the way GTWY opens it (`components/viasocket-panel.tsx`):
+- The embed script loads once, with a builder token (`GET /integrations/builder-token`, `{ org_id, project_id, user_id }`).
+- **Actions → New tool** calls `window.openViasocket(undefined, { embedToken, meta: { type: 'tool' } })`. The pencil on a tool reopens it by flow id.
+- App connections are made inside the builder; this app keeps none of its own.
+- viaSocket posts a window message when a tool is published, updated, paused or deleted. Its `openaiToolJson` becomes an action (`source = viasocket_flow`, `POST /actions/from-flow`). New tools start with **Needs approval** on. Paused turns the action off; deleted removes it (or turns it off if a workflow uses it).
+- At runtime the AI's args are POSTed as JSON to the tool's run URL (`https://flow.sokt.io/func/<id>`), inside the same `action_run` lock as the mock actions.
 
 ## Differences from the real plan (POC shortcuts)
 
