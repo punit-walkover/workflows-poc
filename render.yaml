@@ -29,7 +29,7 @@ services:
       - key: GTWY_SERVICE
         value: openai
       - key: GTWY_MODEL
-        value: gpt-4.1-mini
+        value: gpt-6-luna
       - key: REMIND_AFTER_SEC
         value: "120"
       - key: EXPIRE_AFTER_SEC

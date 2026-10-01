@@ -83,4 +83,4 @@ Catalogue source: `POST https://flow.sokt.io/func/scriolZue69X {"service_id": â€
 - Timeline events live in Postgres `run_event` instead of Mongo `run_events`.
 - Replies are sent automatically (no draft mode); no auth.
 - GTWY chat uses the embed-login session token, because chat still rejects the raw embed JWT.
-- Model: `gpt-4.1-mini` through GTWY (gpt-4o-mini didn't follow the step rules reliably).
+- Model: `gpt-6-luna` through GTWY (set `GTWY_MODEL`; gpt-4o-mini didn't follow the step rules reliably).

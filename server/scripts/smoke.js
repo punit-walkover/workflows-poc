@@ -48,6 +48,7 @@ async function turn(id, seen) {
     const att = await j('POST', '/attachments', { conversation_id: conv.id, file_name: 'crack.png', mime_type: 'image/png', data_base64: png });
     await say('Here is a photo of the damage', { attachment_ids: [att.id] });
     s = await approvePending();
+    if (s.runs[0].status === 'waiting_approval') s = await approvePending(); // the refund needs approval too
   } else if (mode === 'sheets') {
     await say('I want a refund for order 5001, the headphones stopped working after a week.');
     s = await say('Yes, the wireless headphones. They stopped charging.');

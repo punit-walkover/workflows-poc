@@ -12,7 +12,7 @@ export const config = {
     accessKey: process.env.GTWY_ACCESS_KEY!,
     dbBaseUrl: (process.env.GTWY_DB_BASE_URL || 'https://db.gtwy.ai').replace(/\/+$/, ''),
     service: process.env.GTWY_SERVICE || 'openai',
-    model: process.env.GTWY_MODEL || 'gpt-4o-mini',
+    model: process.env.GTWY_MODEL || 'gpt-6-luna',
     embedUserId: 'workflows-poc',
   },
   remindAfterSec: Number(process.env.REMIND_AFTER_SEC || 120),
