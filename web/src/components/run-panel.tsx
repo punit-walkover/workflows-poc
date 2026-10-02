@@ -103,6 +103,8 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
       {list.map((n, i) => {
         const current = run.current_node_id === n.id && ACTIVE.includes(run.status);
         const done = visited.has(n.id) && !current;
+        // The node the run is on gets a yellow box; others keep the same padding so nothing shifts.
+        const box = current ? 'rounded-md border border-warn bg-warn-soft/60 px-1.5 shadow-sm' : 'border border-transparent px-1.5';
         const icon = skipped ? <Minus size={13} className="text-ink-3" />
           : current ? (run.status === 'running' ? <Loader2 size={13} className="animate-spin text-action" /> : <Clock size={13} className="text-warn" />)
           : done ? <Check size={13} className="text-ok" /> : <Circle size={13} className="text-line" />;
@@ -110,7 +112,7 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
           const target = findNode(run.steps, n.target);
           const visit = run.facts.visits?.[n.id];
           return (
-            <div key={n.id} className={`flex items-center gap-2 py-1 text-ink-2 ${skipped ? 'opacity-40' : ''}`}>
+            <div key={n.id} className={`flex items-center gap-2 py-1 text-ink-2 ${box} ${skipped ? 'opacity-40' : ''}`}>
               <span className="shrink-0">{done ? <Check size={13} className="text-ok" /> : <CornerUpLeft size={13} className="text-action" />}</span>
               <span className="w-4 shrink-0 text-ink-3">{i + 1}.</span>
               <span className="truncate">Go to “{target?.type === 'step' ? inlineText(target.content).slice(0, 40) : n.target}”</span>
@@ -120,7 +122,7 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
         }
         if (n.type === 'step') {
           return (
-            <div key={n.id} className={`flex gap-2 py-1 ${skipped ? 'opacity-40' : ''} ${current ? 'font-medium' : ''}`}>
+            <div key={n.id} className={`my-0.5 flex gap-2 py-1 ${box} ${skipped ? 'opacity-40' : ''} ${current ? 'font-medium' : ''}`}>
               <span className="mt-1 shrink-0">{icon}</span>
               <span className="w-4 shrink-0 text-ink-3">{i + 1}.</span>
               <span className="leading-snug"><InlineText content={n.content} /></span>
@@ -129,7 +131,7 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
         }
         const chosen = run.facts.cases?.[n.id];
         return (
-          <div key={n.id} className="py-1">
+          <div key={n.id} className={`my-0.5 py-1 ${box}`}>
             {n.cases.map((c) => {
               const isChosen = chosen?.case_id === c.id;
               const off = skipped || (!!chosen && !isChosen);
