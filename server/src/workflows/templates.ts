@@ -50,7 +50,7 @@ export const TEMPLATES: Template[] = [
                   step('s6', t('Confirm the refunded amount and that it can take 5-10 business days to appear.')),
                 ] },
                 { id: 'c13', kind: 'else_if', condition: [t('The Returns team said the photo is unclear')], steps: [
-                  { id: 'g1', type: 'goto', target: 's3', max_visits: 2 },
+                  { id: 'g1', type: 'goto', target: 's3', max_visits: 2, fresh: true },
                 ] },
                 { id: 'c12', kind: 'else', condition: [], steps: [
                   step('s7', t("Explain the decision politely, using the reviewer's note.")),

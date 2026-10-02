@@ -5,7 +5,8 @@ export interface StepNode { id: string; type: 'step'; content: Inline[] }
 export interface BranchCase { id: string; kind: 'if' | 'else_if' | 'else'; condition: Inline[]; steps: WorkflowNode[] }
 export interface BranchNode { id: string; type: 'branch'; cases: BranchCase[] }
 // Jump back to an earlier node; the target may run at most max_visits times.
-export interface GotoNode { id: string; type: 'goto'; target: string; max_visits: number }
+// fresh = "Ask again": the target restarts as if new; otherwise known answers are kept and only what's missing is asked.
+export interface GotoNode { id: string; type: 'goto'; target: string; max_visits: number; fresh?: boolean }
 export type WorkflowNode = StepNode | BranchNode | GotoNode;
 
 export interface ActionRow {
@@ -42,7 +43,8 @@ export interface Facts {
   cases: Record<string, { case_id: string | null; reason: string }>;
   attempts: Record<string, number>;
   visits: Record<string, number>; // goto id -> visit number of its target
-  since?: Record<string, string>; // node id -> when a Go to step jumped back over it
+  since?: Record<string, string | { at: string; fresh: boolean }>; // node id -> when a Go to step jumped back over it
+  previous?: Record<string, unknown>; // node id -> its result before the last jump back
   collectedBy?: Record<string, string[]>; // node id -> collected keys it filled
 }
 

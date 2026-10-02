@@ -34,7 +34,7 @@ Rules:
 - If the step tells you to explain, confirm or tell the customer something: answer "complete" with that "message".
 - "message" is read by the customer: short, warm, plain text, real values only, no placeholders. Never mention steps, workflows, actions, what you already know about them (like their email) or that you are checking something internally.
 - Answer "escalate" only if the customer demands a human or the step cannot be done.
-- If the conversation has a line saying the workflow went back to this step, do the step again: only messages after that line count for it.
+- If the conversation has a line saying the workflow came back to this step, follow it: either keep what is known and ask only for what the previous results say is missing, or (if it says so) ask again from scratch. Never complete such a step with nothing new.
 - "reason" is required: one short sentence explaining the decision from the facts.
 JSON: {"decision":"complete|ask_customer|call_action|escalate","collected":{},"message":"","missing":[],"action":{"key":"","args":{}},"reason":"one short sentence"}`;
 
@@ -50,7 +50,7 @@ Current step (${input.step.id}): ${renderInline(input.step.content, input.vars)}
 Allowed actions for this step:
 ${allowed}${input.allowed.length ? `\nThis step is not done until you call ${input.allowed.map((a) => a.key).join(' / ')} with "call_action" (put anything to tell the customer in "message"), unless you must "ask_customer" for a missing arg.` : ''}
 Customer: ${input.vars['customer.name']} <${input.vars['customer.email']}>
-Known facts (action results are authoritative): ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs })}
+Known facts (action results are authoritative): ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}
 Conversation (oldest first):
 ${transcript(input.messages)}${input.retry ? '\n Follow the rules exactly.' : ''}`;
   const r = await chat(STEP_SYSTEM, user, true);
@@ -66,7 +66,7 @@ Answer with ONE JSON object only: {"checks":[{"id":"<condition id>","true":true|
 export async function chooseCase(input: { branch: BranchNode; vars: Record<string, string>; facts: Facts; messages: Transcript[] }): Promise<CaseDecision> {
   const conds = input.branch.cases.filter((c) => c.kind !== 'else');
   const list = conds.map((c) => `- id ${c.id}: ${renderInline(c.condition, input.vars)}`).join('\n');
-  const user = `Conditions:\n${list}\nKnown facts: ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs })}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`;
+  const user = `Conditions:\n${list}\nKnown facts: ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`;
   const r = await chat(CASE_SYSTEM, user, true);
   const d = parseJson<{ checks: { id: string; true: boolean; why?: string }[]; reason: string }>(r.content);
   const truth = new Map((d.checks ?? []).map((c) => [c.id, c.true === true]));

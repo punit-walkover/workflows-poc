@@ -34,11 +34,15 @@ export async function decide(runId: string): Promise<Decision> {
   if (!nodeId) return { kind: 'end' };
   const node = ctx.index.get(nodeId)!.node;
   if (node.type === 'goto') return { kind: 'goto', nodeId }; // no AI: a jump is deterministic
-  // A step repeated by Go to step must not reuse answers given before the jump.
-  const since = ctx.run.facts.since?.[nodeId];
+  // A step repeated by Go to step gets a marker in the transcript: keep known answers and ask only for what is
+  // missing (default), or start over ("Ask again"). Older runs stored a plain timestamp, which meant start over.
+  const raw = ctx.run.facts.since?.[nodeId];
+  const since = typeof raw === 'string' ? { at: raw, fresh: true } : raw;
   if (since) {
-    const i = ctx.messages.findIndex((m) => !!m.created_at && new Date(m.created_at).toISOString() > since);
-    const note = { role: 'note', text: 'The workflow went back to this step here. Answers above this line do not count for this step.', attachments: [] };
+    const i = ctx.messages.findIndex((m) => !!m.created_at && new Date(m.created_at).toISOString() > since.at);
+    const note = { role: 'note', attachments: [], text: since.fresh
+      ? 'The workflow went back to this step here. Answers above this line do not count for this step: ask again.'
+      : 'The workflow came back to this step here because something is still missing. Keep what the customer already gave; ask only for what the previous results say is missing.' };
     ctx.messages = i < 0 ? [...ctx.messages, note] : [...ctx.messages.slice(0, i), note, ...ctx.messages.slice(i)];
   }
   let lastError = '';
@@ -156,11 +160,15 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     }
     r.facts.visits[g.id] = visit;
     r.facts.since ??= {};
+    r.facts.previous ??= {};
     const at = new Date().toISOString();
     for (const id of between(index, g.target, g.id)) {
+      // Last results stay visible as "previous", so the repeated steps know why the workflow came back.
+      if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
       delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
-      r.facts.since[id] = at; // answers before this moment no longer count for these steps
-      for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
+      r.facts.since[id] = { at, fresh: !!g.fresh };
+      // "Ask again": the customer's earlier answers to these steps no longer count.
+      if (g.fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
     }
     r.current_node_id = g.target;
     await addEvent(runId, g.id, 'system', 'goto_jumped', { target: g.target, visit, max_visits: g.max_visits });

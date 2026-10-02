@@ -1,7 +1,7 @@
 'use client';
 
-import { ArrowDown, ArrowUp, ChevronDown, CircleDot, CornerUpLeft, GitBranch, Plus, Trash2 } from 'lucide-react';
-import { createContext, useContext, useState } from 'react';
+import { ArrowDown, ArrowUp, CircleDot, CornerUpLeft, GitBranch, ListPlus, Plus, Trash2 } from 'lucide-react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   addCase, appendToCase, BranchNode, GotoNode, gotoTargets, Inline, insertAfter, MAX_DEPTH, moveNode, newBranch, newGoto, newStep, removeCase, removeNode,
   setCondition, setGoto, setStep, toBranch, WorkflowNode,
@@ -28,8 +28,8 @@ export function WorkflowSteps(props: Omit<Ctx, 'focusId' | 'setFocusId'>) {
   return (
     <EditorCtx.Provider value={{ ...ctx, focusId, setFocusId }}>
       <NodeList list={steps} depth={0} />
-      <AddButtons disabled={ctx.remaining <= 0} onStep={add} onBranch={addBranch} className="mt-3"
-                  onGoto={steps.some((n) => n.type === 'step') ? () => ctx.update((st) => [...st, newGoto()]) : undefined} />
+      <AddMenu disabled={ctx.remaining <= 0} onStep={add} onBranch={addBranch} className="mt-2"
+               onGoto={steps.some((n) => n.type === 'step') ? () => ctx.update((st) => [...st, newGoto()]) : undefined} />
     </EditorCtx.Provider>
   );
 }
@@ -78,11 +78,14 @@ function StepRow({ node, list, index, depth }: { node: Extract<WorkflowNode, { t
   );
 }
 
+// Hover tools on a row; "Insert step below" adds a step right after this node.
 function RowTools({ id, canDelete, onCondition }: { id: string; canDelete: boolean; onCondition?: () => void }) {
   const c = useContext(EditorCtx);
   const btn = 'rounded p-1 text-ink-3 hover:bg-panel hover:text-ink';
+  const insert = () => { const s = newStep(); c.update((st) => insertAfter(st, id, s)); c.setFocusId(s.id); };
   return (
     <div className="flex shrink-0 opacity-0 transition group-hover:opacity-100">
+      <button type="button" title="Insert step below" disabled={c.remaining <= 0} className={`${btn} disabled:opacity-30`} onClick={insert}><ListPlus size={14} /></button>
       {onCondition && <button type="button" title="Turn into a condition (If / Else)" className={btn} onClick={onCondition}><GitBranch size={14} /></button>}
       <button type="button" title="Move up" className={btn} onClick={() => c.update((s) => moveNode(s, id, -1))}><ArrowUp size={14} /></button>
       <button type="button" title="Move down" className={btn} onClick={() => c.update((s) => moveNode(s, id, 1))}><ArrowDown size={14} /></button>
@@ -95,9 +98,9 @@ const KIND_LABEL = { if: 'If', else_if: 'Else if', else: 'Else' } as const;
 
 function BranchBlock({ node, number, depth }: { node: BranchNode; number: number; depth: number }) {
   const c = useContext(EditorCtx);
-  const [open, setOpen] = useState(false);
   const hasElse = node.cases.some((x) => x.kind === 'else');
-  const addStepAfter = () => { const s = newStep(); c.update((st) => insertAfter(st, node.id, s)); c.setFocusId(s.id); };
+  const insertAfterBlock = () => { const s = newStep(); c.update((st) => insertAfter(st, node.id, s)); c.setFocusId(s.id); };
+  const chip = 'flex items-center gap-1 rounded-md px-2 py-0.5 text-xs text-ink-3 hover:bg-hover hover:text-ink';
   return (
     <div className="py-1">
       {node.cases.map((cs, ci) => (
@@ -108,6 +111,9 @@ function BranchBlock({ node, number, depth }: { node: BranchNode; number: number
               <CircleDot size={12} /> {KIND_LABEL[cs.kind]}
             </span>
             <div className="flex-1" />
+            {cs.kind === 'if' && <button type="button" title="Insert step after this condition" disabled={c.remaining <= 0}
+                    className="rounded p-1 text-ink-3 opacity-0 hover:bg-panel hover:text-ink group-hover:opacity-100 disabled:opacity-30"
+                    onClick={insertAfterBlock}><ListPlus size={14} /></button>}
             <button type="button" title={cs.kind === 'if' ? 'Remove this condition block' : 'Remove case'}
                     className="rounded p-1 text-ink-3 opacity-0 hover:bg-panel hover:text-bad group-hover:opacity-100"
                     onClick={() => c.update((s) => removeCase(s, cs.id))}><Trash2 size={14} /></button>
@@ -122,31 +128,17 @@ function BranchBlock({ node, number, depth }: { node: BranchNode; number: number
             )}
             <div className="pl-4">
               <NodeList list={cs.steps} depth={depth + 1} />
-              <AddButtons small disabled={c.remaining <= 0}
-                          onStep={() => { const s = newStep(); c.update((st) => appendToCase(st, cs.id, s)); c.setFocusId(s.id); }}
-                          onBranch={depth + 1 < MAX_DEPTH ? () => { const b = newBranch(); c.update((st) => appendToCase(st, cs.id, b)); c.setFocusId(b.cases[0].id); } : undefined}
-                          onGoto={() => c.update((st) => appendToCase(st, cs.id, newGoto()))} />
+              <AddMenu small disabled={c.remaining <= 0}
+                       onStep={() => { const s = newStep(); c.update((st) => appendToCase(st, cs.id, s)); c.setFocusId(s.id); }}
+                       onBranch={depth + 1 < MAX_DEPTH ? () => { const b = newBranch(); c.update((st) => appendToCase(st, cs.id, b)); c.setFocusId(b.cases[0].id); } : undefined}
+                       onGoto={() => c.update((st) => appendToCase(st, cs.id, newGoto()))} />
             </div>
           </div>
         </div>
       ))}
-      <div className="relative ml-14 flex gap-2">
-        <button type="button" onClick={() => setOpen((o) => !o)}
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-ink-2 hover:bg-hover">
-          <Plus size={14} /> Add case <ChevronDown size={14} />
-        </button>
-        <button type="button" disabled={c.remaining <= 0} onClick={addStepAfter}
-                className="flex items-center gap-1 rounded-md px-2 py-1 text-sm text-ink-2 hover:bg-hover disabled:opacity-40">
-          <Plus size={14} /> Step after this block
-        </button>
-        {open && (
-          <div className="absolute left-0 top-8 z-20 w-40 rounded-lg border border-line bg-panel py-1 shadow-lg">
-            <button type="button" className="block w-full px-3 py-1.5 text-left text-sm hover:bg-hover"
-                    onClick={() => { c.update((s) => addCase(s, node.id, 'else_if')); setOpen(false); }}>Else if</button>
-            <button type="button" disabled={hasElse} className="block w-full px-3 py-1.5 text-left text-sm hover:bg-hover disabled:opacity-40"
-                    onClick={() => { c.update((s) => addCase(s, node.id, 'else')); setOpen(false); }}>Else</button>
-          </div>
-        )}
+      <div className="ml-10 flex gap-1">
+        <button type="button" className={chip} onClick={() => c.update((s) => addCase(s, node.id, 'else_if'))}><Plus size={12} /> Else if</button>
+        {!hasElse && <button type="button" className={chip} onClick={() => c.update((s) => addCase(s, node.id, 'else'))}><Plus size={12} /> Else</button>}
       </div>
     </div>
   );
@@ -171,19 +163,41 @@ function GotoRow({ node, index }: { node: GotoNode; index: number }) {
           {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}×</option>)}
         </select>
       </label>
+      <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2"
+             title="Off: keep what the customer already said and ask only for what's missing. On: ask the step again from scratch.">
+        <input type="checkbox" checked={!!node.fresh} onChange={(e) => c.update((s) => setGoto(s, node.id, { fresh: e.target.checked }))} />
+        ask again
+      </label>
       <RowTools id={node.id} canDelete />
     </div>
   );
 }
 
-// "Add step", "Add condition" (a new If block) and "Go to step" at the end of a list.
-function AddButtons({ onStep, onBranch, onGoto, disabled, small, className = '' }: { onStep: () => void; onBranch?: () => void; onGoto?: () => void; disabled: boolean; small?: boolean; className?: string }) {
-  const cls = `flex items-center gap-1.5 rounded-md px-2 py-1 text-ink-2 hover:bg-hover disabled:opacity-40 ${small ? 'text-xs' : 'text-sm'}`;
+// One "+ Add" at the end of a list: a step, a condition (If block) or a Go to step.
+function AddMenu({ onStep, onBranch, onGoto, disabled, small, className = '' }: { onStep: () => void; onBranch?: () => void; onGoto?: () => void; disabled: boolean; small?: boolean; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [open]);
+  const pick = (fn?: () => void) => () => { setOpen(false); fn?.(); };
+  const item = 'flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm hover:bg-hover disabled:opacity-40';
   return (
-    <div className={`flex gap-1 ${className}`}>
-      <button type="button" disabled={disabled} onClick={onStep} className={cls}><Plus size={small ? 13 : 15} /> Add step</button>
-      {onBranch && <button type="button" disabled={disabled} onClick={onBranch} className={cls}><GitBranch size={small ? 13 : 15} /> Add condition</button>}
-      {onGoto && <button type="button" onClick={onGoto} className={cls}><CornerUpLeft size={small ? 13 : 15} /> Go to step</button>}
+    <div ref={box} className={`relative w-fit ${className}`}>
+      <button type="button" onClick={() => setOpen((o) => !o)}
+              className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-ink-3 hover:bg-hover hover:text-ink ${small ? 'text-xs' : 'text-sm'}`}>
+        <Plus size={small ? 13 : 15} /> Add
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-52 rounded-lg border border-line bg-panel py-1 shadow-lg">
+          <button type="button" disabled={disabled} className={item} onClick={pick(onStep)}><Plus size={14} /> Step</button>
+          {onBranch && <button type="button" disabled={disabled} className={item} onClick={pick(onBranch)}><GitBranch size={14} /> Condition (If / Else)</button>}
+          {onGoto && <button type="button" className={item} onClick={pick(onGoto)}><CornerUpLeft size={14} /> Go to step</button>}
+        </div>
+      )}
     </div>
   );
 }

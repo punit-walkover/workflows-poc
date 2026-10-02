@@ -3,7 +3,7 @@ export type Inline = { t: 'text'; v: string } | { t: 'action'; key: string } | {
 export interface StepNode { id: string; type: 'step'; content: Inline[] }
 export interface BranchCase { id: string; kind: 'if' | 'else_if' | 'else'; condition: Inline[]; steps: WorkflowNode[] }
 export interface BranchNode { id: string; type: 'branch'; cases: BranchCase[] }
-export interface GotoNode { id: string; type: 'goto'; target: string; max_visits: number }
+export interface GotoNode { id: string; type: 'goto'; target: string; max_visits: number; fresh?: boolean }
 export type WorkflowNode = StepNode | BranchNode | GotoNode;
 
 export const MAX_STEPS = 15;
@@ -82,7 +82,7 @@ export const appendToCase = (s: WorkflowNode[], caseId: string, node: WorkflowNo
 // "Go to step": jump back to an earlier step, at most max_visits times.
 export const newGoto = (): GotoNode => ({ id: rid(), type: 'goto', target: '', max_visits: 2 });
 
-export const setGoto = (s: WorkflowNode[], id: string, patch: Partial<Pick<GotoNode, 'target' | 'max_visits'>>) =>
+export const setGoto = (s: WorkflowNode[], id: string, patch: Partial<Pick<GotoNode, 'target' | 'max_visits' | 'fresh'>>) =>
   mapLists(s, (l) => l.map((n) => (n.id === id && n.type === 'goto' ? { ...n, ...patch } : n)));
 
 // Steps a Go to may jump to: earlier steps in its own list and on the path above it, labelled like the editor ("3.1 › 2").
