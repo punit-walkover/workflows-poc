@@ -27,7 +27,7 @@ export function validateWorkflow(steps: unknown, enabledActions: string[]): Vali
       else if (n.type === 'goto') {
         if (!n.target) issues.push(`Go to ${where}: pick a step to go to`);
         else if (!seen.includes(n.target)) issues.push(`Go to ${where}: can only jump back to an earlier step`);
-        if (!Number.isInteger(n.max_visits) || n.max_visits < 1 || n.max_visits > 5) issues.push(`Go to ${where}: repeat limit must be 1 to 5`);
+        if (!Number.isInteger(n.max_visits) || n.max_visits < 1 || n.max_visits > config.maxVisits) issues.push(`Go to ${where}: repeat limit must be 1 to ${config.maxVisits}`);
       } else if (n.type === 'branch') {
         if (depth >= config.maxDepth) issues.push(`${where}: conditions can be nested at most ${config.maxDepth} levels`);
         if (!n.cases?.length || n.cases[0].kind !== 'if') issues.push(`${where}: a condition must start with If`);

@@ -8,6 +8,7 @@ export type WorkflowNode = StepNode | BranchNode | GotoNode;
 
 export const MAX_STEPS = 15;
 export const MAX_DEPTH = 2;
+export const MAX_VISITS = 100; // Go to step repeat limit (same as the server)
 
 export const rid = () => Math.random().toString(36).slice(2, 10);
 export const newStep = (content: Inline[] = []): StepNode => ({ id: rid(), type: 'step', content });

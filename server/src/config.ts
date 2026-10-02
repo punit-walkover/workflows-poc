@@ -20,4 +20,5 @@ export const config = {
   approvalTimeoutSec: Number(process.env.APPROVAL_TIMEOUT_SEC || 1800),
   maxSteps: 15,
   maxDepth: 2,
+  maxVisits: 100, // Go to step: most times a target may run
 };

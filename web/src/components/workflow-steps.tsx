@@ -3,7 +3,7 @@
 import { ArrowDown, ArrowUp, CircleDot, CornerUpLeft, GitBranch, ListPlus, Plus, Trash2 } from 'lucide-react';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
-  addCase, appendToCase, BranchNode, GotoNode, gotoTargets, Inline, insertAfter, MAX_DEPTH, moveNode, newBranch, newGoto, newStep, removeCase, removeNode,
+  addCase, appendToCase, BranchNode, GotoNode, gotoTargets, Inline, insertAfter, MAX_DEPTH, MAX_VISITS, moveNode, newBranch, newGoto, newStep, removeCase, removeNode,
   setCondition, setGoto, setStep, toBranch, WorkflowNode,
 } from '@/lib/tree';
 import { StepEditor } from './step-editor';
@@ -159,9 +159,10 @@ function GotoRow({ node, index }: { node: GotoNode; index: number }) {
       </select>
       <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2" title="After this many visits the conversation goes to a person">
         at most
-        <select value={node.max_visits} onChange={(e) => c.update((s) => setGoto(s, node.id, { max_visits: Number(e.target.value) }))} className={sel}>
-          {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}×</option>)}
-        </select>
+        <input type="number" min={1} max={MAX_VISITS} value={node.max_visits}
+               onChange={(e) => c.update((s) => setGoto(s, node.id, { max_visits: Math.min(MAX_VISITS, Math.max(1, Math.round(Number(e.target.value) || 1))) }))}
+               className={`${sel} w-16`} aria-label="Repeat limit" />
+        ×
       </label>
       <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2"
              title="Off: keep what the customer already said and ask only for what's missing. On: ask the step again from scratch.">

@@ -2,7 +2,7 @@
 
 A proof of concept for Ticket0 **workflows** (Chatbase-style procedures):
 
-- **Builder**: clients write steps in plain English, with `@action` chips, `{{variable}}` chips, If / Else if / Else branches nested up to 2 levels, and **Go to step** (jump back to an earlier step, at most 1-5 times). The limit is 15 steps. Drafts are saved; publishing freezes a version.
+- **Builder**: clients write steps in plain English, with `@action` chips, `{{variable}}` chips, If / Else if / Else branches nested up to 2 levels, and **Go to step** (jump back to an earlier step, at most 1-100 times). The limit is 15 steps. Drafts are saved; publishing freezes a version.
 - **Durable runner**: a DBOS workflow walks the published tree one node at a time. GTWY decides each node (JSON answer) and our code runs the actions. An action marked **Needs approval** waits for a teammate.
 - **Playground**: chat as the customer or reply as the team. Every message is labelled **Customer**, **AI** or **Team**. Chats waiting on an approval show a pulsing red dot; open one and approve right in the chat. The right-hand panel has pause/resume/cancel/retry, the step tree, the event timeline and the raw DBOS checkpoints.
 - **Chatbot embed** (`/chatbot`): one `<script src=".../widget.js">` tag puts the same agent in any product. `/embed-demo` is a fake store page with it pasted in; widget chats show up in the Playground with a *widget* badge.
