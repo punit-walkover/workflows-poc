@@ -149,8 +149,10 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     return moveOn(dec.nodeId);
   }
   if (dec.kind === 'goto') {
-    // Jump back: clear what the target and everything after it produced, so those steps run fresh.
+    // Jump forward (skip ahead): nothing re-runs, so just move on. Jump back (a loop): clear what the target and
+    // everything after it produced, so those steps run fresh. Both count against the repeat limit.
     const g = index.get(dec.nodeId)!.node as GotoNode;
+    const forward = (index.get(g.target)?.pos ?? -1) > index.get(g.id)!.pos;
     r.facts.visits ??= {};
     const visit = (r.facts.visits[g.id] ?? 1) + 1;
     if (visit > g.max_visits) {
@@ -162,7 +164,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     r.facts.since ??= {};
     r.facts.previous ??= {};
     const at = new Date().toISOString();
-    for (const id of between(index, g.target, g.id)) {
+    for (const id of forward ? [] : between(index, g.target, g.id)) {
       // Last results stay visible as "previous", so the repeated steps know why the workflow came back.
       if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
       delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
@@ -171,7 +173,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
       if (g.fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
     }
     r.current_node_id = g.target;
-    await addEvent(runId, g.id, 'system', 'goto_jumped', { target: g.target, visit, max_visits: g.max_visits });
+    await addEvent(runId, g.id, 'system', 'goto_jumped', { target: g.target, visit, max_visits: g.max_visits, direction: forward ? 'forward' : 'back' });
     await saveRun(runId, { ...r, status: 'running' });
     return { next: 'continue' };
   }

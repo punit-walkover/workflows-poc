@@ -86,19 +86,17 @@ export const newGoto = (): GotoNode => ({ id: rid(), type: 'goto', target: '', m
 export const setGoto = (s: WorkflowNode[], id: string, patch: Partial<Pick<GotoNode, 'target' | 'max_visits' | 'fresh'>>) =>
   mapLists(s, (l) => l.map((n) => (n.id === id && n.type === 'goto' ? { ...n, ...patch } : n)));
 
-// Steps a Go to may jump to: earlier steps in its own list and on the path above it, labelled like the editor ("3.1 › 2").
-export function gotoTargets(steps: WorkflowNode[], gotoId: string): { id: string; label: string; text: string }[] {
-  let found: { id: string; label: string; text: string }[] | null = null;
-  const walk = (list: WorkflowNode[], prefix: string, earlier: { id: string; label: string; text: string }[]) => {
-    const seen = [...earlier];
+// Steps a Go to may jump to: any step, earlier (a loop) or later (skip ahead), labelled like the editor ("3.1 › 2").
+export function gotoTargets(steps: WorkflowNode[], gotoId: string): { id: string; label: string; text: string; forward: boolean }[] {
+  const out: { id: string; label: string; text: string; forward: boolean }[] = [];
+  let passed = false;
+  const walk = (list: WorkflowNode[], prefix: string) =>
     list.forEach((n, i) => {
-      if (found) return;
       const label = `${prefix}${i + 1}`;
-      if (n.id === gotoId) { found = seen; return; }
-      if (n.type === 'branch') n.cases.forEach((c, ci) => walk(c.steps, `${label}.${ci + 1} › `, seen));
-      if (n.type === 'step') seen.push({ id: n.id, label, text: inlineText(n.content) });
+      if (n.id === gotoId) passed = true;
+      if (n.type === 'step') out.push({ id: n.id, label, text: inlineText(n.content), forward: passed });
+      if (n.type === 'branch') n.cases.forEach((c, ci) => walk(c.steps, `${label}.${ci + 1} › `));
     });
-  };
-  walk(steps, '', []);
-  return found ?? [];
+  walk(steps, '');
+  return out;
 }

@@ -16,9 +16,15 @@ export function validateWorkflow(steps: unknown, enabledActions: string[]): Vali
     if (!allowEmpty && !text(content as Inline[])) issues.push(`${where} is empty`);
   };
 
-  // `earlier` = nodes a Go to step here may jump to: earlier siblings and earlier nodes on the path above.
-  const walk = (list: WorkflowNode[], depth: number, path: string, earlier: string[]) => {
-    const seen = [...earlier];
+  // A Go to step may jump to any step or condition in the workflow, earlier (a loop) or later (skip ahead).
+  const targets = new Set<string>();
+  const collect = (list: WorkflowNode[]) => list.forEach((n) => {
+    if (n.type !== 'goto') targets.add(n.id);
+    if (n.type === 'branch') n.cases?.forEach((c) => collect(c.steps ?? []));
+  });
+  collect(steps as WorkflowNode[]);
+
+  const walk = (list: WorkflowNode[], depth: number, path: string) => {
     list.forEach((n, i) => {
       const where = `${path}${i + 1}`;
       if (!n?.id || ids.has(n.id)) issues.push(`${where}: missing or duplicate id`);
@@ -26,7 +32,7 @@ export function validateWorkflow(steps: unknown, enabledActions: string[]): Vali
       if (n.type === 'step') checkContent(n.content, `Step ${where}`);
       else if (n.type === 'goto') {
         if (!n.target) issues.push(`Go to ${where}: pick a step to go to`);
-        else if (!seen.includes(n.target)) issues.push(`Go to ${where}: can only jump back to an earlier step`);
+        else if (!targets.has(n.target)) issues.push(`Go to ${where}: the step it points to no longer exists`);
         if (!Number.isInteger(n.max_visits) || n.max_visits < 1 || n.max_visits > config.maxVisits) issues.push(`Go to ${where}: repeat limit must be 1 to ${config.maxVisits}`);
       } else if (n.type === 'branch') {
         if (depth >= config.maxDepth) issues.push(`${where}: conditions can be nested at most ${config.maxDepth} levels`);
@@ -38,13 +44,12 @@ export function validateWorkflow(steps: unknown, enabledActions: string[]): Vali
           if (c.kind !== 'else') checkContent(c.condition, `Condition ${cw}`);
           if (!c.steps?.length) issues.push(`${cw}: add at least one step`);
           ids.add(c.id);
-          walk(c.steps ?? [], depth + 1, `${cw}.`, [...seen, n.id]);
+          walk(c.steps ?? [], depth + 1, `${cw}.`);
         });
       } else issues.push(`${where}: unknown node type`);
-      if (n.type !== 'goto') seen.push(n.id);
     });
   };
-  walk(steps as WorkflowNode[], 0, '', []);
+  walk(steps as WorkflowNode[], 0, '');
 
   const step_count = countSteps(steps as WorkflowNode[]);
   if (step_count > config.maxSteps) issues.push(`Too many steps: ${step_count} of ${config.maxSteps}`);

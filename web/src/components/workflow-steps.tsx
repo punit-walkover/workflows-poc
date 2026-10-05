@@ -1,6 +1,6 @@
 'use client';
 
-import { ArrowDown, ArrowUp, CircleDot, CornerUpLeft, GitBranch, ListPlus, Plus, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, CircleDot, CornerDownRight, CornerUpLeft, GitBranch, ListPlus, Plus, Trash2 } from 'lucide-react';
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import {
   addCase, appendToCase, BranchNode, GotoNode, gotoTargets, Inline, insertAfter, MAX_DEPTH, MAX_VISITS, moveNode, newBranch, newGoto, newStep, removeCase, removeNode,
@@ -148,14 +148,19 @@ function BranchBlock({ node, number, depth }: { node: BranchNode; number: number
 function GotoRow({ node, index }: { node: GotoNode; index: number }) {
   const c = useContext(EditorCtx);
   const targets = gotoTargets(c.steps, node.id);
+  const forward = targets.find((t) => t.id === node.target)?.forward ?? false;
   const sel = 'rounded-md border border-line bg-panel px-2 py-1 text-sm';
+  const option = (t: (typeof targets)[number]) => <option key={t.id} value={t.id}>Step {t.label} · {t.text.slice(0, 60) || '(empty)'}</option>;
   return (
     <div className="group flex items-center gap-2 rounded-md px-1 py-1.5 hover:bg-hover/60">
       <span className="w-6 shrink-0 text-right text-ink-3">{index + 1}.</span>
-      <span className="inline-flex items-center gap-1 rounded-md bg-action-soft px-2 py-0.5 text-xs font-medium text-action"><CornerUpLeft size={12} /> Go to step</span>
+      <span className="inline-flex items-center gap-1 rounded-md bg-action-soft px-2 py-0.5 text-xs font-medium text-action">
+        {forward ? <CornerDownRight size={12} /> : <CornerUpLeft size={12} />} Go to step
+      </span>
       <select value={node.target} onChange={(e) => c.update((s) => setGoto(s, node.id, { target: e.target.value }))} className={`${sel} min-w-0 flex-1`}>
-        <option value="">Pick an earlier step…</option>
-        {targets.map((t) => <option key={t.id} value={t.id}>Step {t.label} · {t.text.slice(0, 60) || '(empty)'}</option>)}
+        <option value="">Pick a step…</option>
+        <optgroup label="Earlier steps (loop back)">{targets.filter((t) => !t.forward).map(option)}</optgroup>
+        <optgroup label="Later steps (skip ahead)">{targets.filter((t) => t.forward).map(option)}</optgroup>
       </select>
       <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2" title="After this many visits the conversation goes to a person">
         at most
@@ -164,11 +169,13 @@ function GotoRow({ node, index }: { node: GotoNode; index: number }) {
                className={`${sel} w-16`} aria-label="Repeat limit" />
         ×
       </label>
-      <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2"
-             title="Off: keep what the customer already said and ask only for what's missing. On: ask the step again from scratch.">
-        <input type="checkbox" checked={!!node.fresh} onChange={(e) => c.update((s) => setGoto(s, node.id, { fresh: e.target.checked }))} />
-        ask again
-      </label>
+      {!forward && (
+        <label className="flex shrink-0 items-center gap-1 text-xs text-ink-2"
+               title="Off: keep what the customer already said and ask only for what's missing. On: ask the step again from scratch.">
+          <input type="checkbox" checked={!!node.fresh} onChange={(e) => c.update((s) => setGoto(s, node.id, { fresh: e.target.checked }))} />
+          ask again
+        </label>
+      )}
       <RowTools id={node.id} canDelete />
     </div>
   );

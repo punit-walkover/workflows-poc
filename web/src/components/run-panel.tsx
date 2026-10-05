@@ -164,7 +164,7 @@ function findNode(list: WorkflowNode[], id: string): WorkflowNode | null {
 
 const LABEL: Record<string, string> = {
   run_started: 'Run started', llm_decision: 'Model decided', case_chosen: 'Branch chosen', action_called: 'Action called',
-  action_result: 'Action result', goto_jumped: 'Went back', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
+  action_result: 'Action result', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
   message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
   run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
   error: 'Error', invalid_action: 'Invalid action',
@@ -178,7 +178,7 @@ function summary(e: EventRow): string {
     case 'case_chosen': return `${d.case_id} — ${d.reason}`;
     case 'action_called': return `${d.key}(${JSON.stringify(d.args)})`;
     case 'action_result': return d.ok ? JSON.stringify(d.result).slice(0, 140) : `failed: ${d.error}`;
-    case 'goto_jumped': return `to ${d.target} · visit ${d.visit} of ${d.max_visits}`;
+    case 'goto_jumped': return `${d.direction === 'forward' ? 'ahead' : 'back'} to ${d.target} · visit ${d.visit} of ${d.max_visits}`;
     case 'goto_limit': return `${d.target} already ran ${d.max_visits}× · handed to a person`;
     case 'approval_requested': return d.summary;
     case 'waiting': return d.for === 'customer' ? `customer: ${(d.expects ?? []).join(', ')}` : 'approval';
