@@ -1,0 +1,287 @@
+<title>Canvas: Typebot-style vs React Flow</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one reading column with a sticky contents rail; two-column "A vs B" blocks; dotted canvas grid as the one motif. */
+:root {
+  --bg: #f6f7fa; --panel: #ffffff; --ink: #1b2130; --ink-2: #4a5468; --line: #dfe3ec;
+  --a: #b5541c; --a-soft: #fbeee5;      /* Typebot-style */
+  --b: #2f5fd0; --b-soft: #e7eefc;      /* React Flow */
+  --ok: #23824f; --ok-soft: #e4f4ea; --warn: #9a6a12; --warn-soft: #fdf3e1; --bad: #b3261e; --bad-soft: #fbe6e4;
+  --dot: #d5dae6;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12151c; --panel: #1a1f29; --ink: #e6e9f0; --ink-2: #a5adbf; --line: #2c3342;
+  --a: #f0a06e; --a-soft: #3a2619; --b: #7fa2ff; --b-soft: #1f2a45;
+  --ok: #6fd19a; --ok-soft: #173326; --warn: #e3b25c; --warn-soft: #3a2f1a; --bad: #f08a80; --bad-soft: #3b1d1b; --dot: #262c39; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12151c; --panel: #1a1f29; --ink: #e6e9f0; --ink-2: #a5adbf; --line: #2c3342;
+  --a: #f0a06e; --a-soft: #3a2619; --b: #7fa2ff; --b-soft: #1f2a45;
+  --ok: #6fd19a; --ok-soft: #173326; --warn: #e3b25c; --warn-soft: #3a2f1a; --bad: #f08a80; --bad-soft: #3b1d1b; --dot: #262c39; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 17px/1.65 var(--body); padding-inline: 16px; padding-block: 0 64px }
+.wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr) } nav.toc { display: none } }
+
+header.hero { max-width: 1100px; margin: 0 auto 40px; padding-block: 48px 32px; border-bottom: 1px solid var(--line);
+  background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 22px 22px }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-2) }
+h1 { font: 700 clamp(30px, 5vw, 46px)/1.1 var(--display); margin: 12px 0 14px; text-wrap: balance; letter-spacing: -.01em }
+h1 .a { color: var(--a) } h1 .b { color: var(--b) }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 64ch; margin: 0 }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px }
+.chip { font: 500 12px/1 var(--mono); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2) }
+.chip.a { color: var(--a); background: var(--a-soft); border-color: transparent }
+.chip.b { color: var(--b); background: var(--b-soft); border-color: transparent }
+
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font: 14px/1.5 var(--display) }
+nav.toc ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; counter-reset: s }
+nav.toc a { color: var(--ink-2); text-decoration: none; display: flex; gap: 8px }
+nav.toc a::before { counter-increment: s; content: counter(s); font: 12px/1.6 var(--mono); color: var(--ink-2); width: 16px }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink) }
+
+main { min-width: 0 }
+section { padding-block: 8px 28px; border-bottom: 1px solid var(--line); margin-bottom: 28px }
+section:last-child { border-bottom: 0 }
+h2 { font: 700 26px/1.25 var(--display); margin: 0 0 12px; text-wrap: balance }
+h3 { font: 600 18px/1.3 var(--display); margin: 22px 0 8px }
+p, li { max-width: 70ch }
+p { margin: 0 0 12px }
+ul, ol { padding-left: 22px; margin: 0 0 12px }
+li { margin-bottom: 4px }
+code { font: 14px var(--mono); background: var(--b-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px }
+pre { font: 13.5px/1.55 var(--mono); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px }
+pre code { background: none; padding: 0 }
+a { color: var(--b) }
+a:focus-visible { outline: 2px solid var(--b); outline-offset: 2px }
+
+/* Verdict block */
+.verdict { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin: 0 0 14px }
+.side { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; border-top: 4px solid var(--line) }
+.side.a { border-top-color: var(--a) } .side.b { border-top-color: var(--b) }
+.side h3 { margin: 0 0 4px }
+.side .tag { font: 500 12px/1.4 var(--mono); color: var(--ink-2); margin: 0 0 10px }
+.side ul { margin: 0; font-size: 16px }
+
+.scroll { overflow-x: auto; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel) }
+table { border-collapse: collapse; width: 100%; font-size: 15px; min-width: 640px }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font: 600 12px/1.3 var(--display); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); background: var(--bg) }
+th.a { color: var(--a) } th.b { color: var(--b) }
+tr:last-child td { border-bottom: 0 }
+td:first-child { font-family: var(--display); font-size: 14.5px; font-weight: 600 }
+.num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 14px }
+
+.s { display: inline-block; font: 500 12px/1.5 var(--mono); padding: 0 7px; border-radius: 99px; white-space: nowrap; margin-right: 4px }
+.s.ok { background: var(--ok-soft); color: var(--ok) }
+.s.lib { background: var(--b-soft); color: var(--b) }
+.s.own { background: var(--a-soft); color: var(--a) }
+.s.no { background: var(--bad-soft); color: var(--bad) }
+.s.wait { background: var(--warn-soft); color: var(--warn) }
+
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 0 0 14px; max-width: 74ch }
+.note strong { font-family: var(--display) }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0 0 14px }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 13px/1.5 var(--display); color: var(--ink-2); margin: 0 0 10px }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto } }
+</style>
+
+<header class="hero">
+  <div class="eyebrow">Ticket0 · Workflows POC · Canvas decision</div>
+  <h1><span class="a">Typebot-style</span> vs <span class="b">React Flow</span></h1>
+  <p class="lede">Two ways to build the workflow canvas, built side by side on the same graph and runner. This page compares how each one works, what it gives you, what it costs, and which to take into Ticket0.</p>
+  <div class="meta">
+    <span class="chip a">branch: canvas_typebot</span>
+    <span class="chip b">branch: create_react_flow_canvas</span>
+    <span class="chip">same graph · same runner · same validation</span>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#verdict">Recommendation</a></li>
+    <li><a href="#same">What is shared</a></li>
+    <li><a href="#how">How each one works</a></li>
+    <li><a href="#features">Feature by feature</a></li>
+    <li><a href="#cost">Code, size, license</a></li>
+    <li><a href="#gotchas">What we learned</a></li>
+    <li><a href="#status">Test status</a></li>
+    <li><a href="#next">Next steps</a></li>
+  </ol>
+</nav>
+
+<main>
+<section id="verdict">
+  <h2>Recommendation</h2>
+  <p><b>Use React Flow for Ticket0.</b> Keep the Typebot-style branch as a learning reference. With about the same amount of our own code, React Flow already includes the things the Typebot-style version was still missing: re-pointing arrows, box-select, a minimap and copy/paste. It is also MIT licensed, so nothing stands in the way of commercial use.</p>
+  <div class="verdict">
+    <div class="side a">
+      <h3>Typebot-style (from scratch)</h3>
+      <p class="tag">@use-gesture + svg-round-corners + our own code</p>
+      <ul>
+        <li>Best for learning: every piece is visible and ours</li>
+        <li>Full control over the look and behaviour</li>
+        <li>Tested end to end, including a live run</li>
+        <li>Every new canvas feature has to be built by hand</li>
+        <li>Arrow paths are adapted from Typebot (FSL), so they can't go into commercial Ticket0 as they are</li>
+      </ul>
+    </div>
+    <div class="side b">
+      <h3>React Flow (library)</h3>
+      <p class="tag">@xyflow/react 12 (MIT) + our cards and arrows</p>
+      <ul>
+        <li>Pan, zoom, drag, handles, selection, re-pointing and minimap all included</li>
+        <li>Same amount of our own code, with more features</li>
+        <li>MIT licensed, safe for Ticket0</li>
+        <li>Some library rules to follow (measured sizes, handle updates)</li>
+        <li>Built, but a few interactions are still to be tested</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<section id="same">
+  <h2>What is shared</h2>
+  <p>Only the canvas layer differs. Everything under it is the same code on both branches, so either canvas can be swapped in without touching the server.</p>
+  <ul>
+    <li><b>Saved graph:</b> <code>WorkflowGraph</code> with groups, items and arrows, stored in <code>workflow.graph</code> and <code>workflow_version.graph</code>.</li>
+    <li><b>Runner:</b> the <code>Flow</code> interface, <code>graphFlow</code>, loop backs with a trail, repeat limits and "ask again".</li>
+    <li><b>Validation:</b> <code>validateGraph</code>, which checks reachability, one arrow per output, a limit on every loop, and at most 50 steps.</li>
+    <li><b>Editing helpers:</b> <code>web/src/lib/graph.ts</code>, made of pure functions such as <code>connect</code>, <code>removeItem</code> and <code>tidy</code>. The React Flow branch adds <code>moveItemTo</code>, <code>reconnect</code>, <code>removeMany</code> and <code>copyGroups</code>/<code>pasteGroups</code>, and the other branch can use them too.</li>
+    <li><b>Page:</b> undo/redo, Save, Publish, the step counter and the run panel's <code>GraphRun</code>.</li>
+  </ul>
+</section>
+
+<section id="how">
+  <h2>How each one works</h2>
+  <h3>Typebot-style: we own the whole canvas</h3>
+  <p>One <code>div</code> is moved with <code>transform: translate() scale()</code>. <code>@use-gesture</code> turns pointer moves into pan and drag. Each dot registers its element, and after every change the canvas measures every dot and draws arrows from those positions into an SVG layer. Connecting, palette drag and the arrow panel are all hand-written pointer handling.</p>
+  <h3>React Flow: the library owns the canvas, we supply cards and arrows</h3>
+  <p>Each group becomes a custom node (<code>type: 'card'</code>), and each arrow becomes a custom edge (<code>type: 'wf'</code>). Each case and each "then" is a <code>&lt;Handle type="source"&gt;</code>. Each step, and the card's top, is a <code>&lt;Handle type="target"&gt;</code>. React Flow measures handles itself and calls us back with changes: moves, connections, deletions and selection. We apply each one to the graph.</p>
+  <div class="diagram">
+    <div class="legend"><span>Same edit, two paths:</span><span>drawing an arrow from a case to a step</span></div>
+<pre class="mermaid">
+flowchart TB
+  subgraph A[Typebot-style]
+    a1[pointerdown on our dot] --> a2[our state: drawing]
+    a2 --> a3[window pointermove: redraw preview path]
+    a3 --> a4[pointerup: elementFromPoint finds data-drop]
+    a4 --> a5[connect in lib/graph]
+    a5 --> a6[re-measure every dot, redraw SVG]
+  end
+  subgraph B[React Flow]
+    b1[mousedown on a Handle] --> b2[React Flow draws the connection line]
+    b2 --> b3{dropped on a handle?}
+    b3 -- yes --> b4[onConnect]
+    b3 -- no --> b5[onConnectEnd: card, step or empty canvas]
+    b4 --> b6[connect in lib/graph]
+    b5 --> b6
+    b6 --> b7[React Flow redraws arrows from its own handle data]
+  end
+</pre>
+  </div>
+  <p>React Flow needs per-node state that the graph doesn't have: measured size, selection and dragging. The React Flow branch keeps that in a small <code>ui</code> map next to the graph and merges the two when it builds the node list. Positions still live only in the graph, so undo, save and tidy work the same on both branches.</p>
+</section>
+
+<section id="features">
+  <h2>Feature by feature</h2>
+  <div class="legend">
+    <span><span class="s lib">library</span>React Flow provides it</span>
+    <span><span class="s own">our code</span>we wrote it</span>
+    <span><span class="s no">missing</span>not built</span>
+    <span><span class="s wait">to test</span>built, not yet verified</span>
+  </div>
+  <div class="scroll"><table>
+    <thead><tr><th>Feature</th><th class="a">Typebot-style</th><th class="b">React Flow</th></tr></thead>
+    <tbody>
+      <tr><td>Pan, wheel scroll, Ctrl+wheel zoom, pinch</td><td><span class="s own">our code</span>about 40 lines</td><td><span class="s lib">library</span>props only</td></tr>
+      <tr><td>Zoom buttons, fit to screen</td><td><span class="s own">our code</span></td><td><span class="s lib">library</span><code>zoomIn</code>, <code>fitView</code></td></tr>
+      <tr><td>Drag a card</td><td><span class="s own">our code</span><code>useDrag</code> on the header</td><td><span class="s lib">library</span><code>dragHandle: '.wf-drag'</code></td></tr>
+      <tr><td>Auto-pan when dragging near the edge</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span></td></tr>
+      <tr><td>Arrows follow cards as they grow</td><td><span class="s own">our code</span>ResizeObserver + re-measure</td><td><span class="s lib">library</span>+ <code>useUpdateNodeInternals</code> on reorder</td></tr>
+      <tr><td>Draw an arrow by dragging a dot</td><td><span class="s own">our code</span></td><td><span class="s lib">library</span></td></tr>
+      <tr><td>Drop an arrow anywhere on a card or step</td><td><span class="s own">our code</span></td><td><span class="s own">our code</span><code>onConnectEnd</code></td></tr>
+      <tr><td>Drop an arrow on empty canvas to make a new group</td><td><span class="s no">missing</span></td><td><span class="s own">our code</span><span class="s wait">to test</span></td></tr>
+      <tr><td>Re-point an arrow by dragging its end</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span><code>onReconnect</code> <span class="s wait">to test</span></td></tr>
+      <tr><td>Rounded right-angle arrows</td><td><span class="s own">our code</span>adapted from Typebot</td><td><span class="s lib">library</span><code>getSmoothStepPath</code></td></tr>
+      <tr><td>Loop label "↺ max N" and arrow settings panel</td><td><span class="s own">our code</span></td><td><span class="s own">our code</span><code>EdgeLabelRenderer</code></td></tr>
+      <tr><td>Palette drag (Step / Condition)</td><td><span class="s own">our code</span>append or new group</td><td><span class="s own">our code</span>can also insert at a position</td></tr>
+      <tr><td>Drag a step to reorder, to another group, or out to a new group</td><td><span class="s no">missing</span>only ↑/↓ buttons</td><td><span class="s own">our code</span>grip + drop line <span class="s wait">to test</span></td></tr>
+      <tr><td>Box-select several cards, Ctrl+click to add</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span>Shift + drag</td></tr>
+      <tr><td>Move several cards together</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span></td></tr>
+      <tr><td>Delete key for cards and arrows</td><td><span class="s own">our code</span>arrows only</td><td><span class="s lib">library</span>start group is protected</td></tr>
+      <tr><td>Copy, paste, duplicate, select all</td><td><span class="s no">missing</span></td><td><span class="s own">our code</span><span class="s wait">to test</span></td></tr>
+      <tr><td>Minimap</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span></td></tr>
+      <tr><td>Tidy up</td><td><span class="s own">our code</span></td><td><span class="s own">our code</span>uses React Flow's measured heights</td></tr>
+      <tr><td>Undo / redo</td><td><span class="s own">our code</span></td><td><span class="s own">our code</span>same stack; one undo per drag</td></tr>
+      <tr><td>Keyboard access and ARIA labels</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span>basic</td></tr>
+      <tr><td>Only drawing what's on screen (large graphs)</td><td><span class="s no">missing</span></td><td><span class="s lib">library</span><code>onlyRenderVisibleElements</code></td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="cost">
+  <h2>Code, size, license</h2>
+  <div class="scroll"><table>
+    <thead><tr><th></th><th class="a">Typebot-style</th><th class="b">React Flow</th></tr></thead>
+    <tbody>
+      <tr><td>Canvas code we own</td><td class="num">~470 lines</td><td class="num">~470 lines</td></tr>
+      <tr><td>Split</td><td>canvas 245 · card 137 · arrow paths 69 · context 21</td><td>canvas 254 · card 137 · arrow 52 · context 24</td></tr>
+      <tr><td>What those lines buy</td><td>The basics</td><td>The basics, plus re-pointing, step drag, copy/paste, drop-to-create and protected delete</td></tr>
+      <tr><td>Dependencies</td><td><code>@use-gesture/react</code>, <code>svg-round-corners</code> (both small, MIT)</td><td><code>@xyflow/react</code> (MIT), roughly 50 KB gzipped with its CSS</td></tr>
+      <tr><td>License of our canvas code</td><td>Arrow paths adapted from Typebot, <b>FSL-1.1-ALv2</b>: fine for learning, not for commercial Ticket0</td><td>All our own code on an MIT library; no restrictions</td></tr>
+      <tr><td>Who fixes canvas bugs</td><td>Us</td><td>The library for the core, us for cards and arrows</td></tr>
+      <tr><td>Learning value</td><td>High: you see how a canvas works inside</td><td>Medium: you learn the library's model</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><strong>Attribution.</strong> React Flow shows a small "React Flow" link in the corner. MIT allows hiding it with <code>proOptions.hideAttribution</code>; the maintainers ask commercial users to consider a subscription.</div>
+</section>
+
+<section id="gotchas">
+  <h2>What we learned building the React Flow version</h2>
+  <ul>
+    <li><b>Controlled nodes must keep <code>measured</code>.</b> If the node list is rebuilt from the graph without each node's measured size, React Flow treats the nodes as unmeasured. Fix: keep size, selection and dragging in a <code>ui</code> map and merge them in.</li>
+    <li><b>The <code>fitView</code> prop didn't fit</b> when nodes are rebuilt from the graph, and stayed at 100%. Fix: call <code>fitView</code> once <code>useNodesInitialized()</code> is true.</li>
+    <li><b>Reordering steps doesn't resize the card</b>, so handle positions went stale. Fix: call <code>useUpdateNodeInternals(id)</code> whenever the card's items or cases change.</li>
+    <li><b><code>'group'</code> is a built-in node type</b> with its own styling. Our type is named <code>'card'</code>.</li>
+    <li><b>Dropping an arrow on a card body</b> isn't a connection in React Flow, which only connects handle to handle. <code>onConnectEnd</code> checks what's under the pointer (<code>data-drop</code>) and connects there.</li>
+    <li><b>Arrow labels draw under the cards.</b> React Flow's label layer sits below the nodes, and the default label spot for a backward arrow can fall on a card. The "↺ max 2" label in the test graph was hidden this way. Fix still to do: place backward-arrow labels on the arrow's vertical segment, beside the source card.</li>
+    <li><b>Undo for drags</b>: an undo point is saved in <code>onNodeDragStart</code>, and every move during the drag is transient, so one drag is one undo.</li>
+  </ul>
+</section>
+
+<section id="status">
+  <h2>Test status</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Check</th><th class="a">Typebot-style</th><th class="b">React Flow</th></tr></thead>
+    <tbody>
+      <tr><td>Type-check (server and web)</td><td><span class="s ok">pass</span></td><td><span class="s ok">pass</span></td></tr>
+      <tr><td>Renders the test graph (6 cards, 6 arrows)</td><td><span class="s ok">pass</span></td><td><span class="s ok">pass</span></td></tr>
+      <tr><td>Fit on open</td><td><span class="s ok">pass</span></td><td><span class="s ok">pass</span> (after the fix above)</td></tr>
+      <tr><td>Palette drop on empty canvas makes a group</td><td><span class="s ok">pass</span></td><td><span class="s ok">pass</span></td></tr>
+      <tr><td>Arrow dropped on a card body connects</td><td><span class="s ok">pass</span></td><td><span class="s ok">pass</span></td></tr>
+      <tr><td>Loop label visible</td><td><span class="s ok">pass</span></td><td><span class="s no">fails</span> hidden under a card</td></tr>
+      <tr><td>Arrow to empty canvas makes a group</td><td>n/a</td><td><span class="s wait">to test</span> (the test drop landed on a card)</td></tr>
+      <tr><td>Step drag, re-pointing, copy/paste, box-select, delete, undo</td><td>undo: <span class="s ok">pass</span></td><td><span class="s wait">to test</span></td></tr>
+      <tr><td>Save, publish, live playground run with loop back</td><td><span class="s ok">pass</span></td><td><span class="s wait">to test</span> (runner unchanged)</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="next">
+  <h2>Next steps</h2>
+  <ol>
+    <li>Fix the loop label position on backward arrows.</li>
+    <li>Test the remaining React Flow interactions in the browser: arrow to empty canvas, step drag between groups, re-pointing, copy/paste, box-select, delete, undo.</li>
+    <li>Save, publish and run the test workflow in the playground on the React Flow branch.</li>
+    <li>Commit <code>create_react_flow_canvas</code>. Keep <code>canvas_typebot</code> unmerged as the learning reference.</li>
+    <li>When the canvas moves into Ticket0, take the React Flow branch. The Typebot-derived <code>edge-path.ts</code> is already gone from it.</li>
+  </ol>
+</section>
+</main>
+</div>

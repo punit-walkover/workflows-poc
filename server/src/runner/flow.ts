@@ -1,8 +1,11 @@
-import { BranchNode, GotoNode, GraphEdge, StepNode, WorkflowGraph, WorkflowNode } from '../types';
+import { BranchNode, GotoNode, GraphEdge, Inline, InputFormat, StepNode, WorkflowGraph, WorkflowNode } from '../types';
 import { indexTree, nextAfter } from '../workflows/tree';
 
 // What the runner needs from a workflow version, whether it is a tree (list editor) or a graph (canvas).
-export type FlowNode = StepNode | BranchNode | GotoNode;
+// Canvas-only nodes that need no AI: a text bubble says its text; an input asks and saves the reply.
+export interface SayNode { id: string; type: 'say'; content: Inline[] }
+export interface AskNode { id: string; type: 'ask'; prompt: Inline[]; saveAs: string; format: InputFormat; retry?: string }
+export type FlowNode = StepNode | BranchNode | GotoNode | SayNode | AskNode;
 export interface Jump { to: string | null; edge?: GraphEdge }
 export interface Flow {
   kind: 'tree' | 'graph';
@@ -46,8 +49,13 @@ export function graphFlow(g: WorkflowGraph): Flow {
       const p = at.get(id);
       const it = p && groups.get(p.groupId)!.items[p.idx];
       if (!it) return undefined;
-      // A condition item runs exactly like a branch whose cases lead out through edges.
-      return it.type === 'step' ? { id, type: 'step', content: it.content } : { id, type: 'branch', cases: it.cases.map((c) => ({ ...c, steps: [] })) };
+      switch (it.type) {
+        case 'step': return { id, type: 'step', content: it.content };
+        case 'bubble': return { id, type: 'say', content: it.content };
+        case 'input': return { id, type: 'ask', prompt: it.prompt, saveAs: it.saveAs, format: it.format, retry: it.retry };
+        // A condition item runs exactly like a branch whose cases lead out through edges.
+        case 'condition': return { id, type: 'branch', mode: it.mode, cases: it.cases.map((c) => ({ ...c, steps: [] })) };
+      }
     },
     next,
     afterCase: (id, caseId) => {

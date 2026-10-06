@@ -1,245 +1,283 @@
 'use client';
 
-// Workflow canvas, built the way Typebot's builder is (apps/builder/src/features/graph in
-// github.com/baptisteArno/typebot.io): one CSS-transformed layer for pan/zoom driven by @use-gesture,
-// absolutely positioned group cards, endpoints that report their on-screen position, and orthogonal SVG edges.
-import { useDrag } from '@use-gesture/react';
-import { GitBranch, Maximize, Minus, Plus, StretchHorizontal, Trash2, Type, CornerUpLeft } from 'lucide-react';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+// Workflow canvas on React Flow (@xyflow/react, MIT). React Flow gives pan/zoom, node dragging, handles,
+// connecting, re-pointing arrows, box selection and the minimap; this file maps our WorkflowGraph onto it
+// and adds the Typebot-style pieces: step drag between groups, palette, drop-on-card connecting, copy/paste.
+import '@xyflow/react/dist/style.css';
 import {
-  addGroup, appendItem, connect, EdgeFrom, EdgeTo, GraphEdge, loopEdges, newConditionItem, newStepItem, removeEdge, setEdge,
-  sourceKey, targetKey, tidy, WorkflowGraph,
+  Background, BackgroundVariant, Connection, ConnectionLineType, Edge, EdgeChange, FinalConnectionState, MarkerType, MiniMap,
+  NodeChange, Panel, ReactFlow, ReactFlowProvider, applyNodeChanges, useConnection, useNodesInitialized, useReactFlow, useViewport,
+} from '@xyflow/react';
+import { Maximize, Minus, Plus, StretchHorizontal, X } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  addGroup, addVariable, BLOCKS, Clip, connect, copyGroups, EdgeTo, fromHandle, GraphItem, insertItem, loopEdges, moveItemTo, newStepItem, removeVariable, toVarName,
+  pasteGroups, reconnect, removeEdge, removeMany, sourceHandle, targetHandle, tidy, toHandle, WorkflowGraph,
 } from '@/lib/graph';
-import { MAX_VISITS } from '@/lib/tree';
-import { CanvasContext } from './context';
-import { drawingPath, edgeMidpoint, edgePath } from './edge-path';
-import { GroupCard } from './group-card';
+import { CanvasContext, DropSlot } from './context';
+import { EDGE_COLOR, WfEdge, WfEdgeType } from './edge';
+import { BLOCK_ICON, GroupNode, GroupNodeType } from './group-card';
 
-type View = { x: number; y: number; scale: number };
-type Pt = { x: number; y: number };
-const MIN = 0.3, MAX = 1.6;
-
-export function Canvas({ graph, onChange, actions, variables, highlight, readOnly }: {
+type Props = {
   graph: WorkflowGraph;
   onChange: (g: WorkflowGraph, opts?: { transient?: boolean }) => void;
   actions: { key: string; name: string; enabled: boolean }[];
   variables: { key: string; label: string }[];
   highlight?: { current?: string | null; done?: Set<string> };
   readOnly?: boolean;
-}) {
-  const outer = useRef<HTMLDivElement>(null);
-  const inner = useRef<HTMLDivElement>(null);
-  const [view, setView] = useState<View>({ x: 60, y: 60, scale: 1 });
-  const viewRef = useRef(view);
-  viewRef.current = view;
+};
+type NodeUi = Pick<GroupNodeType, 'measured' | 'selected' | 'dragging'>;
+type ItemDrag = ({ itemId: string } | { make: () => GraphItem; label: string }) & { x: number; y: number };
+
+const nodeTypes = { card: GroupNode };
+const edgeTypes = { wf: WfEdge };
+const FIT = { padding: { top: '40px', right: '40px', bottom: '40px', left: '230px' }, maxZoom: 1 } as const;
+
+export function Canvas(props: Props) {
+  return <ReactFlowProvider><Flow {...props} /></ReactFlowProvider>;
+}
+
+// The element under a pointer: a step card ("item:<group>:<item>"), a group card ("group:<group>"), or the empty pane.
+function hit(x: number, y: number) {
+  const el = document.elementFromPoint(x, y) as HTMLElement | null;
+  const card = el?.closest<HTMLElement>('[data-drop^="group:"]');
+  const item = el?.closest<HTMLElement>('[data-drop^="item:"]');
+  return { el, card, item, pane: !card && !!el?.closest('.react-flow__pane') };
+}
+const point = (e: MouseEvent | TouchEvent) => ('changedTouches' in e ? e.changedTouches[0] : e);
+
+function Flow({ graph, onChange, actions, variables, highlight, readOnly }: Props) {
+  const rf = useReactFlow<GroupNodeType, WfEdgeType>();
+  const { zoom } = useViewport();
+  const connecting = useConnection((s) => s.inProgress);
   const graphRef = useRef(graph);
   graphRef.current = graph;
   const update = useCallback((fn: (g: WorkflowGraph) => WorkflowGraph, opts?: { transient?: boolean }) => onChange(fn(graphRef.current), opts), [onChange]);
 
-  // Screen point → canvas point.
-  const toCanvas = useCallback((clientX: number, clientY: number): Pt => {
-    const r = inner.current!.getBoundingClientRect();
-    return { x: (clientX - r.left) / viewRef.current.scale, y: (clientY - r.top) / viewRef.current.scale };
-  }, []);
+  // Nodes come from the graph; React Flow's own per-node state (size, selection, dragging) is kept beside it.
+  const [ui, setUi] = useState<Record<string, NodeUi>>({});
+  const nodes = useMemo<GroupNodeType[]>(() => graph.groups.map((g) => ({
+    id: g.id, type: 'card', position: { x: g.x, y: g.y }, data: { group: g }, dragHandle: '.wf-drag', deletable: g.id !== graph.start, ...ui[g.id],
+  })), [graph, ui]);
+  const onNodesChange = useCallback((changes: NodeChange<GroupNodeType>[]) => {
+    const next = applyNodeChanges(changes, nodes);
+    setUi(Object.fromEntries(next.map((n) => [n.id, { measured: n.measured, selected: n.selected, dragging: n.dragging }])));
+    const moves = changes.filter((c) => c.type === 'position' && c.position);
+    // The drag-start handler saved an undo point, so the moves themselves are transient.
+    if (moves.length) update((g) => ({ ...g, groups: g.groups.map((grp) => {
+      const m = moves.find((c) => c.type === 'position' && c.id === grp.id);
+      return m && m.type === 'position' && m.position ? { ...grp, x: Math.round(m.position.x), y: Math.round(m.position.y) } : grp;
+    }) }), { transient: true });
+  }, [nodes, update]);
 
-  // Endpoint registry: each dot hands over its element; arrows are measured from them after every change.
-  const els = useRef(new Map<string, HTMLElement>());
-  const register = useCallback((key: string) => (el: HTMLElement | null) => { if (el) els.current.set(key, el); else els.current.delete(key); }, []);
-  const [tick, setTick] = useState(0);
-  useEffect(() => {
-    const ro = new ResizeObserver(() => setTick((t) => t + 1));
-    inner.current?.querySelectorAll('[id^="group-"]').forEach((el) => ro.observe(el));
-    return () => ro.disconnect();
-  }, [graph.groups.length]);
-  const [ys, setYs] = useState(new Map<string, number>());
-  useLayoutEffect(() => {
-    const m = new Map<string, number>();
-    els.current.forEach((el, key) => { const r = el.getBoundingClientRect(); m.set(key, toCanvas(r.left + r.width / 2, r.top + r.height / 2).y); });
-    setYs(m);
-  }, [graph, tick, view.scale, toCanvas]);
-
-  // Pan by dragging empty space; wheel pans, Ctrl/⌘ + wheel (or pinch) zooms around the pointer.
-  const zoomAt = useCallback((next: number, clientX: number, clientY: number) => {
-    const o = outer.current!.getBoundingClientRect();
-    setView((v) => {
-      const scale = Math.min(MAX, Math.max(MIN, next));
-      const mx = clientX - o.left, my = clientY - o.top;
-      return { scale, x: mx - ((mx - v.x) / v.scale) * scale, y: my - ((my - v.y) / v.scale) * scale };
-    });
-  }, []);
-  useEffect(() => {
-    const el = outer.current!;
-    const onWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) zoomAt(viewRef.current.scale * (1 - e.deltaY * 0.002), e.clientX, e.clientY);
-      else setView((v) => ({ ...v, x: v.x - e.deltaX, y: v.y - e.deltaY }));
-    };
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
-  }, [zoomAt]);
-  const bindPan = useDrag(({ delta: [dx, dy], event }) => {
-    if ((event.target as HTMLElement).closest('[data-node], [data-ui]')) return;
-    setView((v) => ({ ...v, x: v.x + dx, y: v.y + dy }));
-  });
-
-  // Connecting: from an output dot to a card or a step, with a live arrow under the pointer.
-  const [drawing, setDrawing] = useState<{ from: EdgeFrom; start: Pt; at: Pt } | null>(null);
-  const startConnect = useCallback((from: EdgeFrom, e: React.PointerEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const el = els.current.get(sourceKey(from))!.getBoundingClientRect();
-    const start = toCanvas(el.left + el.width / 2, el.top + el.height / 2);
-    setDrawing({ from, start, at: start });
-  }, [toCanvas]);
-  useEffect(() => {
-    if (!drawing) return;
-    const move = (e: PointerEvent) => setDrawing((d) => d && { ...d, at: toCanvas(e.clientX, e.clientY) });
-    const up = (e: PointerEvent) => {
-      const drop = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-drop]')?.dataset.drop;
-      if (drop) {
-        const [kind, groupId, itemId] = drop.split(':');
-        const to: EdgeTo = kind === 'item' ? { groupId, itemId } : { groupId };
-        update((g) => connect(g, drawing.from, to));
-      }
-      setDrawing(null);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up, { once: true });
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  }, [drawing, toCanvas, update]);
-
-  // Palette: drag a Step or Condition onto a card to add it there, or onto empty canvas for a new group.
-  const [dragItem, setDragItem] = useState<{ type: 'step' | 'condition'; at: Pt } | null>(null);
-  useEffect(() => {
-    if (!dragItem) return;
-    const move = (e: PointerEvent) => setDragItem((d) => d && { ...d, at: { x: e.clientX, y: e.clientY } });
-    const up = (e: PointerEvent) => {
-      const make = dragItem.type === 'step' ? newStepItem : newConditionItem;
-      const target = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
-      const groupId = target?.closest<HTMLElement>('[id^="group-"]')?.id.slice(6);
-      if (groupId) update((g) => appendItem(g, groupId, make()));
-      else if (target && outer.current?.contains(target)) {
-        const p = toCanvas(e.clientX, e.clientY);
-        update((g) => addGroup(g, { x: p.x - 40, y: p.y - 20 }, make(), dragItem.type === 'step' ? 'Group' : 'Check'));
-      }
-      setDragItem(null);
-    };
-    window.addEventListener('pointermove', move);
-    window.addEventListener('pointerup', up, { once: true });
-    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); };
-  }, [dragItem, toCanvas, update]);
-
-  // Arrows, drawn from the measured endpoints.
+  // Arrows come from the graph too; only their selection is local.
   const loops = useMemo(() => loopEdges(graph), [graph]);
-  const groups = useMemo(() => new Map(graph.groups.map((g) => [g.id, g])), [graph.groups]);
-  const [selected, setSelected] = useState<string | null>(null);
-  useEffect(() => {
-    const del = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement)?.closest('input, textarea, [contenteditable="true"]');
-      if (selected && !typing && (e.key === 'Delete' || e.key === 'Backspace')) { update((g) => removeEdge(g, selected)); setSelected(null); }
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const edges = useMemo<WfEdgeType[]>(() => graph.edges.map((e) => {
+    const on = picked.has(e.id);
+    return {
+      id: e.id, type: 'wf', source: e.from.groupId, sourceHandle: sourceHandle(e.from), target: e.to.groupId, targetHandle: targetHandle(e.to),
+      data: { edge: e }, selected: on, zIndex: on ? 1000 : undefined,
+      markerEnd: { type: MarkerType.ArrowClosed, width: 16, height: 16, color: on ? EDGE_COLOR.selected : loops.has(e.id) ? EDGE_COLOR.loop : EDGE_COLOR.idle },
     };
-    window.addEventListener('keydown', del);
-    return () => window.removeEventListener('keydown', del);
-  }, [selected, update]);
-  const geo = (e: GraphEdge) => {
-    const s = groups.get(e.from.groupId), t = groups.get(e.to.groupId);
-    const sy = ys.get(sourceKey(e.from));
-    if (!s || !t || sy === undefined) return null;
-    const ty = e.to.itemId ? ys.get(targetKey(e.to)) : undefined;
-    return { d: edgePath(s, sy, t, ty), mid: edgeMidpoint(s, sy, t, ty) };
-  };
+  }), [graph.edges, picked, loops]);
+  const onEdgesChange = useCallback((changes: EdgeChange<WfEdgeType>[]) => setPicked((s) => {
+    const next = new Set(s);
+    for (const c of changes) if (c.type === 'select') (c.selected ? next.add(c.id) : next.delete(c.id));
+    return next;
+  }), []);
+  const selectEdge = useCallback((id: string) => {
+    setPicked(new Set([id]));
+    setUi((u) => Object.fromEntries(Object.entries(u).map(([k, v]) => [k, { ...v, selected: false }])));
+  }, []);
 
-  const fit = () => {
-    if (!graph.groups.length || !outer.current) return;
-    const xs = graph.groups.map((g) => g.x), yv = graph.groups.map((g) => g.y);
-    const w = Math.max(...xs) + 340 - Math.min(...xs), h = Math.max(...yv) + 320 - Math.min(...yv);
-    const o = outer.current.getBoundingClientRect();
-    const left = readOnly ? 24 : 170; // keep clear of the palette
-    const scale = Math.min(1, Math.max(MIN, Math.min((o.width - left - 24) / w, (o.height - 48) / h)));
-    setView({ scale, x: left - Math.min(...xs) * scale, y: 24 - Math.min(...yv) * scale });
+  // Connecting. A drop on a handle is handled by onConnect; a drop anywhere on a card or step connects there too,
+  // and a drop on empty canvas makes a new group with an empty step and connects to it (like Typebot).
+  const onConnect = useCallback((c: Connection) =>
+    update((g) => connect(g, fromHandle(c.source, c.sourceHandle), toHandle(c.target, c.targetHandle))), [update]);
+  const dropTarget = (e: MouseEvent | TouchEvent): EdgeTo | 'pane' | null => {
+    const { clientX, clientY } = point(e);
+    const h = hit(clientX, clientY);
+    if (h.item) { const [, groupId, itemId] = h.item.dataset.drop!.split(':'); return { groupId, itemId }; }
+    if (h.card) return { groupId: h.card.dataset.drop!.slice(6) };
+    return h.pane ? 'pane' : null;
   };
-  useEffect(() => { fit(); /* first open */ }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const toNewGroup = (g: WorkflowGraph, e: MouseEvent | TouchEvent) => {
+    const { clientX, clientY } = point(e);
+    const at = rf.screenToFlowPosition({ x: clientX, y: clientY });
+    const next = addGroup(g, { x: at.x, y: at.y - 20 }, newStepItem());
+    return { g: next, to: { groupId: next.groups.at(-1)!.id } };
+  };
+  const onConnectEnd = useCallback((e: MouseEvent | TouchEvent, s: FinalConnectionState) => {
+    if (s.isValid || !s.fromHandle || s.fromHandle.type !== 'source') return;
+    const from = fromHandle(s.fromHandle.nodeId, s.fromHandle.id);
+    const to = dropTarget(e);
+    if (to === 'pane') update((g) => { const n = toNewGroup(g, e); return connect(n.g, from, n.to); });
+    else if (to) update((g) => connect(g, from, to));
+  }, [update]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const sel = graph.edges.find((e) => e.id === selected);
-  const selGeo = sel && geo(sel);
+  // Re-pointing: drag either end of an arrow. Dropping its head on a card works too; dropping it on nothing deletes it.
+  const repointed = useRef(true);
+  const onReconnect = useCallback((old: Edge, c: Connection) => {
+    repointed.current = true;
+    update((g) => reconnect(g, old.id, fromHandle(c.source, c.sourceHandle), toHandle(c.target, c.targetHandle)));
+  }, [update]);
+  const onReconnectEnd = useCallback((e: MouseEvent | TouchEvent, edge: Edge, _t: unknown, s: FinalConnectionState) => {
+    if (repointed.current) return;
+    repointed.current = true;
+    const old = graphRef.current.edges.find((x) => x.id === edge.id);
+    const to = s.fromHandle?.type === 'source' ? dropTarget(e) : null; // the head moved
+    if (old && to && to !== 'pane') update((g) => reconnect(g, old.id, old.from, to));
+    else update((g) => removeEdge(g, edge.id));
+  }, [update]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Dragging a step (by its grip) or a palette item: a line shows where it will land.
+  const [drag, setDrag] = useState<ItemDrag | null>(null);
+  const [dropSlot, setDropSlot] = useState<DropSlot>(null);
+  const startItemDrag = useCallback((e: React.PointerEvent, d: { itemId: string } | { make: () => GraphItem; label: string }) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDrag({ ...d, x: e.clientX, y: e.clientY });
+  }, []);
+  const slotAt = (x: number, y: number): DropSlot => {
+    const { card } = hit(x, y);
+    if (!card) return null;
+    const mids = [...card.querySelectorAll<HTMLElement>('[data-drop^="item:"]')].map((el) => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; });
+    return { groupId: card.dataset.drop!.slice(6), index: mids.filter((m) => m < y).length };
+  };
+  useEffect(() => {
+    if (!drag) return;
+    const move = (e: PointerEvent) => { setDrag((d) => d && { ...d, x: e.clientX, y: e.clientY }); setDropSlot(slotAt(e.clientX, e.clientY)); };
+    const end = () => { setDrag(null); setDropSlot(null); };
+    const up = (e: PointerEvent) => {
+      const slot = slotAt(e.clientX, e.clientY);
+      const { pane } = hit(e.clientX, e.clientY);
+      const at = rf.screenToFlowPosition({ x: e.clientX - 30, y: e.clientY - 20 });
+      if ('itemId' in drag) {
+        if (slot) update((g) => moveItemTo(g, drag.itemId, slot));
+        else if (pane) update((g) => moveItemTo(g, drag.itemId, { at }));
+      } else if (slot) update((g) => insertItem(g, slot.groupId, drag.make(), slot.index));
+      else if (pane) update((g) => addGroup(g, at, drag.make()));
+      end();
+    };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') end(); };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up, { once: true });
+    window.addEventListener('keydown', key);
+    return () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('keydown', key); };
+  }, [drag, rf, update]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Copy (Ctrl+C), paste (Ctrl+V), duplicate (Ctrl+D) and select all (Ctrl+A) for groups. Pasted groups come in selected.
+  const clip = useRef<Clip | null>(null);
+  const pastes = useRef(0);
+  useEffect(() => {
+    if (readOnly) return;
+    const paste = (c: Clip) => {
+      pastes.current += 1;
+      const { graph: g, ids } = pasteGroups(graphRef.current, c, 48 * pastes.current);
+      onChange(g);
+      setPicked(new Set());
+      setUi((u) => ({ ...Object.fromEntries(Object.entries(u).map(([k, v]) => [k, { ...v, selected: false }])), ...Object.fromEntries(ids.map((id) => [id, { selected: true }])) }));
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || (e.target as HTMLElement)?.closest('input, textarea, [contenteditable="true"]')) return;
+      const selected = graphRef.current.groups.filter((g) => ui[g.id]?.selected).map((g) => g.id);
+      const k = e.key.toLowerCase();
+      if (k === 'c' && selected.length) { clip.current = copyGroups(graphRef.current, selected); pastes.current = 0; }
+      else if (k === 'v' && clip.current) { e.preventDefault(); paste(clip.current); }
+      else if (k === 'd' && selected.length) { e.preventDefault(); pastes.current = 0; paste(copyGroups(graphRef.current, selected)); }
+      else if (k === 'a') { e.preventDefault(); setUi((u) => Object.fromEntries(graphRef.current.groups.map((g) => [g.id, { ...u[g.id], selected: true }]))); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [ui, onChange, readOnly]);
+
+  // Fit once, after the cards have been measured.
+  const measured = useNodesInitialized();
+  const fitted = useRef(false);
+  useEffect(() => { if (measured && !fitted.current) { fitted.current = true; rf.fitView(FIT); } }, [measured, rf]);
+
+  const tidyUp = () => {
+    update((g) => tidy(g, (id) => rf.getInternalNode(id)?.measured.height));
+    requestAnimationFrame(() => rf.fitView({ ...FIT, duration: 300 }));
+  };
+  // Built-in variables plus the workflow's own, for {{ }} pickers in every block.
+  const allVars = useMemo(() => [...variables, ...(graph.variables ?? []).map((k) => ({ key: k, label: k }))], [variables, graph.variables]);
+  const [newVar, setNewVar] = useState('');
   const btn = 'flex size-8 items-center justify-center rounded-md text-ink-2 hover:bg-hover hover:text-ink';
 
   return (
-    <CanvasContext.Provider value={{ graph, update, scale: view.scale, actions, variables, register, startConnect, connecting: !!drawing, highlight, readOnly }}>
-      <div ref={outer} {...bindPan()} onClick={(e) => { if (!(e.target as HTMLElement).closest('[data-node], [data-ui], path')) setSelected(null); }}
-           className="relative h-full w-full touch-none overflow-hidden bg-canvas"
-           style={{ backgroundImage: 'radial-gradient(var(--color-line) 1px, transparent 1px)', backgroundSize: `${20 * view.scale}px ${20 * view.scale}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
-        <div ref={inner} className="absolute left-0 top-0 origin-top-left will-change-transform"
-             style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.scale})` }}>
-          <svg className="pointer-events-none absolute left-0 top-0 overflow-visible" width="1" height="1">
-            <defs>
-              <marker id="cv-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#9a9a94" /></marker>
-              <marker id="cv-arrow-on" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="var(--color-brand)" /></marker>
-            </defs>
-            {graph.edges.map((e) => {
-              const g = geo(e);
-              if (!g) return null;
-              const on = e.id === selected;
-              return (
-                <g key={e.id} className="pointer-events-auto">
-                  <path d={g.d} stroke="transparent" strokeWidth={16} fill="none" style={{ cursor: 'pointer' }} onClick={(ev) => { ev.stopPropagation(); setSelected(e.id); }} />
-                  <path d={g.d} fill="none" strokeWidth={2} stroke={on ? 'var(--color-brand)' : loops.has(e.id) ? 'var(--color-action)' : '#a3a39d'}
-                        strokeDasharray={loops.has(e.id) ? '6 4' : undefined} markerEnd={on ? 'url(#cv-arrow-on)' : 'url(#cv-arrow)'} />
-                </g>
-              );
-            })}
-            {drawing && <path d={drawingPath(drawing.start, drawing.at)} fill="none" stroke="var(--color-brand)" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#cv-arrow-on)" />}
-          </svg>
-          {graph.groups.map((g) => <GroupCard key={g.id} group={g} />)}
-          {/* Loop arrows say how often they may repeat. */}
-          {graph.edges.filter((e) => loops.has(e.id)).map((e) => {
-            const g = geo(e);
-            return g && (
-              <button key={e.id} data-ui onClick={(ev) => { ev.stopPropagation(); setSelected(e.id); }}
-                      className="absolute -translate-x-1/2 -translate-y-1/2 rounded-full border border-action/30 bg-action-soft px-1.5 py-0.5 text-[10px] font-medium text-action"
-                      style={{ left: g.mid.x, top: g.mid.y }}>
-                ↺ {e.maxVisits ? `max ${e.maxVisits}` : 'no limit'}
-              </button>
-            );
-          })}
-          {sel && selGeo && !readOnly && (
-            <div data-ui className="absolute z-20 flex -translate-x-1/2 translate-y-3 items-center gap-2 rounded-lg border border-line bg-panel px-2 py-1.5 text-xs shadow-lg"
-                 style={{ left: selGeo.mid.x, top: selGeo.mid.y }}>
-              {loops.has(sel.id) && <>
-                <label className="flex items-center gap-1">repeat at most
-                  <input type="number" min={1} max={MAX_VISITS} value={sel.maxVisits ?? ''} placeholder="—"
-                         onChange={(e) => update((g) => setEdge(g, sel.id, { maxVisits: e.target.value ? Math.min(MAX_VISITS, Math.max(1, Math.round(Number(e.target.value)))) : undefined }))}
-                         className="w-14 rounded border border-line px-1 py-0.5" />×</label>
-                <label className="flex items-center gap-1"><input type="checkbox" checked={!!sel.fresh} onChange={(e) => update((g) => setEdge(g, sel.id, { fresh: e.target.checked }))} /> ask again</label>
-              </>}
-              <button title="Delete arrow (Del)" onClick={() => { update((g) => removeEdge(g, sel.id)); setSelected(null); }} className="rounded p-1 text-ink-3 hover:bg-hover hover:text-bad"><Trash2 size={13} /></button>
-            </div>
-          )}
-        </div>
+    <CanvasContext.Provider value={{ graph, update, actions, variables: allVars, loops, selectEdge, startItemDrag, dropSlot, highlight, readOnly }}>
+      <ReactFlow<GroupNodeType, WfEdgeType>
+        className={`bg-canvas ${connecting ? 'wf-connecting' : ''}`}
+        nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes}
+        onNodesChange={onNodesChange} onEdgesChange={onEdgesChange}
+        onNodeDragStart={() => update((g) => g)}
+        onConnect={onConnect} onConnectEnd={onConnectEnd}
+        onReconnectStart={() => { repointed.current = false; }} onReconnect={onReconnect} onReconnectEnd={onReconnectEnd}
+        onDelete={({ nodes: ns, edges: es }) => update((g) => removeMany(g, ns.map((n) => n.id), es.map((e) => e.id)))}
+        nodesDraggable={!readOnly} nodesConnectable={!readOnly} edgesReconnectable={!readOnly}
+        deleteKeyCode={readOnly ? null : ['Delete', 'Backspace']}
+        selectionKeyCode="Shift" multiSelectionKeyCode={['Control', 'Meta']}
+        panOnScroll zoomActivationKeyCode={['Control', 'Meta']} minZoom={0.3} maxZoom={1.6}
+        connectionLineType={ConnectionLineType.SmoothStep} connectionLineStyle={{ stroke: EDGE_COLOR.selected, strokeWidth: 2, strokeDasharray: '5 4' }}
+        connectionRadius={28}>
+        <Background variant={BackgroundVariant.Dots} gap={20} size={1.2} color="#d6d6d0" />
+        <MiniMap position="bottom-left" pannable zoomable nodeColor="#e6e6e2" nodeStrokeColor="#c9c9c3" maskColor="rgba(245,245,242,0.7)" />
 
         {!readOnly && (
-          <div data-ui className="absolute left-3 top-3 flex flex-col gap-1 rounded-xl border border-line bg-panel p-1.5 shadow-sm">
-            <div className="px-1 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-3">Drag in</div>
-            {([['step', 'Step', Type], ['condition', 'Condition', GitBranch]] as const).map(([type, label, Icon]) => (
-              <button key={type} onPointerDown={(e) => { e.preventDefault(); setDragItem({ type, at: { x: e.clientX, y: e.clientY } }); }}
-                      className="flex cursor-grab items-center gap-2 rounded-md border border-line px-2.5 py-1.5 text-sm hover:bg-hover"><Icon size={14} /> {label}</button>
+          <Panel position="top-left" className="!m-3 flex max-h-[calc(100%-24px)] w-[200px] flex-col gap-2 overflow-y-auto rounded-xl border border-line bg-panel p-2 shadow-sm">
+            {BLOCKS.map((sec) => (
+              <div key={sec.section}>
+                <div className="px-0.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{sec.section}</div>
+                <div className="grid grid-cols-2 gap-1">
+                  {sec.items.map((b) => {
+                    const Icon = BLOCK_ICON[b.key];
+                    return (
+                      <button key={b.key} title={`Drag in: ${b.label}`} onPointerDown={(e) => startItemDrag(e, { make: b.make, label: b.label })}
+                              className={`flex cursor-grab touch-none items-center gap-1.5 rounded-md border border-line px-1.5 py-1 text-xs hover:bg-hover ${sec.items.length === 1 ? 'col-span-2' : ''}`}>
+                        <Icon size={13} className="shrink-0 text-ink-2" /> <span className="truncate">{b.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             ))}
-            <div className="mt-1 flex items-center gap-1 px-1 text-[10px] text-ink-3"><CornerUpLeft size={10} /> drag a dot to connect</div>
-          </div>
+            {/* The workflow's own variables: inputs fill them, rules compare them, any block can show them as {{name}}. */}
+            <div>
+              <div className="px-0.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">Variables</div>
+              <div className="flex flex-wrap gap-1">
+                {(graph.variables ?? []).map((v) => (
+                  <span key={v} className="group/v flex items-center gap-0.5 rounded bg-var-soft px-1.5 py-0.5 font-mono text-[11px] text-var">
+                    {v}
+                    <button title="Remove variable" onClick={() => update((g) => removeVariable(g, v))} className="hidden hover:text-bad group-hover/v:block"><X size={10} /></button>
+                  </span>
+                ))}
+              </div>
+              <input value={newVar} placeholder="+ new variable" onChange={(e) => setNewVar(e.target.value)}
+                     onKeyDown={(e) => { if (e.key === 'Enter' && toVarName(newVar)) { update((g) => addVariable(g, toVarName(newVar))); setNewVar(''); } }}
+                     className="mt-1 w-full rounded border border-line px-1.5 py-0.5 font-mono text-[11px] outline-none focus:border-brand" />
+            </div>
+            <div className="space-y-0.5 px-0.5 text-[10px] leading-snug text-ink-3">
+              <div>Drag a dot to connect</div>
+              <div>Shift + drag to select</div>
+              <div>Ctrl + C / V / D to copy, paste, duplicate</div>
+            </div>
+          </Panel>
         )}
-        <div data-ui className="absolute right-3 top-3 flex items-center gap-0.5 rounded-xl border border-line bg-panel p-1 shadow-sm">
-          <button title="Zoom out" className={btn} onClick={() => { const o = outer.current!.getBoundingClientRect(); zoomAt(view.scale - 0.15, o.left + o.width / 2, o.top + o.height / 2); }}><Minus size={15} /></button>
-          <span className="w-10 text-center text-xs text-ink-3">{Math.round(view.scale * 100)}%</span>
-          <button title="Zoom in" className={btn} onClick={() => { const o = outer.current!.getBoundingClientRect(); zoomAt(view.scale + 0.15, o.left + o.width / 2, o.top + o.height / 2); }}><Plus size={15} /></button>
-          <button title="Fit to screen" className={btn} onClick={fit}><Maximize size={15} /></button>
-          {!readOnly && <button title="Tidy up" className={btn} onClick={() => update((g) => tidy(g, (id) => (document.getElementById(`group-${id}`)?.offsetHeight)))}><StretchHorizontal size={15} /></button>}
+        <Panel position="top-right" className="!m-3 flex items-center gap-0.5 rounded-xl border border-line bg-panel p-1 shadow-sm">
+          <button title="Zoom out" className={btn} onClick={() => rf.zoomOut({ duration: 150 })}><Minus size={15} /></button>
+          <span className="w-10 text-center text-xs text-ink-3">{Math.round(zoom * 100)}%</span>
+          <button title="Zoom in" className={btn} onClick={() => rf.zoomIn({ duration: 150 })}><Plus size={15} /></button>
+          <button title="Fit to screen" className={btn} onClick={() => rf.fitView({ ...FIT, duration: 300 })}><Maximize size={15} /></button>
+          {!readOnly && <button title="Tidy up" className={btn} onClick={tidyUp}><StretchHorizontal size={15} /></button>}
+        </Panel>
+      </ReactFlow>
+      {drag && (
+        <div className="pointer-events-none fixed z-50 rounded-md border border-brand bg-panel px-2.5 py-1.5 text-sm shadow-lg" style={{ left: drag.x + 10, top: drag.y + 10 }}>
+          {'itemId' in drag ? 'Move step' : drag.label}
         </div>
-        {dragItem && (
-          <div className="pointer-events-none fixed z-50 rounded-md border border-brand bg-panel px-2.5 py-1.5 text-sm shadow-lg" style={{ left: dragItem.at.x + 8, top: dragItem.at.y + 8 }}>
-            {dragItem.type === 'step' ? 'Step' : 'Condition'}
-          </div>
-        )}
-      </div>
+      )}
     </CanvasContext.Provider>
   );
 }

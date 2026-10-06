@@ -11,7 +11,9 @@ export async function loadRun(runId: string) {
     'select name, version, steps, graph, workflow_id from workflow_version where id = $1', [run.workflow_version_id]);
   const conv = await one<{ customer_name: string; customer_email: string }>('select * from conversation where id = $1', [run.conversation_id]);
   const messages = await loadTranscript(run.conversation_id);
-  const vars = { 'customer.name': conv!.customer_name, 'customer.email': conv!.customer_email, today: new Date().toISOString().slice(0, 10) };
+  const vars: Record<string, string> = { 'customer.name': conv!.customer_name, 'customer.email': conv!.customer_email, today: new Date().toISOString().slice(0, 10) };
+  // The workflow's own variables (filled by input blocks) read like the built-in ones once they have a value.
+  for (const k of version!.graph?.variables ?? []) if (run.facts.collected[k] !== undefined) vars[k] = String(run.facts.collected[k]);
   return { run, version: version!, flow: flowOf(version!), messages, vars };
 }
 

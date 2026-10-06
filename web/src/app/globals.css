@@ -40,3 +40,12 @@ html, body { background: var(--color-canvas); color: var(--color-ink); }
 .chip-action { background: var(--color-action-soft); color: var(--color-action); }
 .chip-var { background: var(--color-var-soft); color: var(--color-var); }
 .chip-missing { background: var(--color-warn-soft); color: var(--color-warn); }
+
+/* Canvas (React Flow) handles: outputs are ringed dots on a card's right edge; inputs show only while connecting. */
+.react-flow__handle.wf-out { width: 16px; height: 16px; background: var(--color-panel); border: 1px solid var(--color-line); box-shadow: 0 1px 2px rgb(0 0 0 / 0.06); }
+.react-flow__handle.wf-out::after { content: ""; position: absolute; inset: 3px; border-radius: 9999px; border: 2.5px solid color-mix(in srgb, var(--color-brand) 70%, transparent); }
+.react-flow__handle.wf-out:hover { border-color: var(--color-brand); }
+.react-flow__handle.wf-in { width: 10px; height: 10px; min-width: 0; min-height: 0; background: transparent; border: 0; }
+.wf-connecting .react-flow__handle.wf-in { background: color-mix(in srgb, var(--color-brand) 35%, transparent); }
+.wf-connecting .react-flow__handle.wf-in.connectingto, .wf-connecting .react-flow__handle.wf-in.valid { background: var(--color-brand); }
+.react-flow__node-card { cursor: default; }

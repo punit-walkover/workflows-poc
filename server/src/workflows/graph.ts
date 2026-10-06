@@ -1,5 +1,5 @@
 import { config } from '../config';
-import { GraphEdge, GraphGroup, GraphItem, Inline, VARIABLES, WorkflowGraph, WorkflowNode } from '../types';
+import { GraphEdge, GraphGroup, GraphItem, Inline, INPUT_FORMATS, RULE_OPS, VARIABLES, WorkflowGraph, WorkflowNode } from '../types';
 import { renderInline } from './tree';
 
 const rid = () => Math.random().toString(36).slice(2, 10);
@@ -83,7 +83,7 @@ export function layout(g: WorkflowGraph): WorkflowGraph {
 
 // Rough card height (header, steps, conditions, footer), so stacked cards don't overlap.
 export const cardHeight = (grp: GraphGroup) =>
-  76 + grp.items.reduce((h, it) => h + (it.type === 'step' ? 64 : 56 + it.cases.length * 48), 0);
+  76 + grp.items.reduce((h, it) => h + (it.type === 'condition' ? 56 + it.cases.length * 48 : it.type === 'input' ? 88 : 64), 0);
 
 const allItems = (g: WorkflowGraph) => g.groups.flatMap((grp) => grp.items);
 
@@ -91,11 +91,16 @@ export function graphMentions(g: WorkflowGraph) {
   const actions = new Set<string>();
   const vars = new Set<string>();
   const scan = (c: Inline[]) => c.forEach((p) => (p.t === 'action' ? actions.add(p.key) : p.t === 'var' ? vars.add(p.key) : 0));
-  for (const it of allItems(g)) it.type === 'step' ? scan(it.content) : it.cases.forEach((c) => scan(c.condition));
+  for (const it of allItems(g)) {
+    if (it.type === 'step' || it.type === 'bubble') scan(it.content);
+    else if (it.type === 'input') { scan(it.prompt); vars.add(it.saveAs); }
+    else it.cases.forEach((c) => { scan(c.condition); c.rules?.forEach((r) => vars.add(r.var)); });
+  }
   return { actions: [...actions], vars: [...vars] };
 }
 
-export const graphStepCount = (g: WorkflowGraph) => allItems(g).filter((i) => i.type === 'step').length;
+// Everything but conditions counts toward the step limit.
+export const graphStepCount = (g: WorkflowGraph) => allItems(g).filter((i) => i.type !== 'condition').length;
 
 // Groups that sit on a cycle, as strongly connected components (Tarjan). A loop needs a repeat limit somewhere.
 export function cycles(g: WorkflowGraph): string[][] {
@@ -132,11 +137,27 @@ export function validateGraph(g: unknown, enabledActions: string[]) {
       if (items.has(it.id)) issues.push(`"${grp.title}": duplicate item id`);
       items.set(it.id, { item: it, group: grp });
       if (it.type === 'step' && !text(it.content)) issues.push(`"${grp.title}": a step is empty`);
+      if (it.type === 'bubble') {
+        if (!text(it.content)) issues.push(`"${grp.title}": a text bubble is empty`);
+        if (it.content.some((p) => p.t === 'action')) issues.push(`"${grp.title}": a text bubble can't run @actions; use an AI step`);
+      }
+      if (it.type === 'input') {
+        if (!it.saveAs) issues.push(`"${grp.title}": choose a variable to save the answer in`);
+        if (!INPUT_FORMATS.includes(it.format)) issues.push(`"${grp.title}": unknown input type`);
+      }
       if (it.type === 'condition') {
         if (it.cases[0]?.kind !== 'if') issues.push(`"${grp.title}": a condition must start with If`);
         it.cases.forEach((c, ci) => {
           if (c.kind === 'else' && ci !== it.cases.length - 1) issues.push(`"${grp.title}": Else must be last`);
-          if (c.kind !== 'else' && !text(c.condition)) issues.push(`"${grp.title}": a condition is empty`);
+          if (c.kind === 'else') return;
+          if (it.mode !== 'rules' && !text(c.condition)) issues.push(`"${grp.title}": a condition is empty`);
+          if (it.mode === 'rules') {
+            if (!c.rules?.length) issues.push(`"${grp.title}": add a rule to each case`);
+            c.rules?.forEach((r) => {
+              if (!r.var) issues.push(`"${grp.title}": a rule has no variable`);
+              if (!RULE_OPS.includes(r.op)) issues.push(`"${grp.title}": a rule has an unknown comparison`);
+            });
+          }
         });
       }
     }
@@ -174,6 +195,8 @@ export function validateGraph(g: unknown, enabledActions: string[]) {
   if (step_count > config.maxGraphSteps) issues.push(`Too many steps: ${step_count} of ${config.maxGraphSteps}`);
   const { actions, vars } = graphMentions(graph);
   actions.filter((k) => !enabledActions.includes(k)).forEach((k) => issues.push(`@${k} doesn't exist or is disabled`));
-  vars.filter((k) => !VARIABLES.some((v) => v.key === k)).forEach((k) => issues.push(`Unknown variable {{${k}}}`));
+  const own = graph.variables ?? [];
+  vars.filter((k) => k && !VARIABLES.some((v) => v.key === k) && !own.includes(k)).forEach((k) => issues.push(`Unknown variable {{${k}}}`));
+  own.filter((k) => !/^[a-z][a-z0-9_]*$/.test(k)).forEach((k) => issues.push(`Variable "${k}": use lowercase letters, digits and _`));
   return { issues, action_keys: actions, step_count };
 }

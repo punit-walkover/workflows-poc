@@ -2,9 +2,10 @@ import { config } from '../config';
 import { one, q } from '../db';
 import { executeAction, getAction, validateArgs } from '../actions/execute';
 import { chooseCase, compose, decideStep, StepDecision } from '../llm/decider';
-import { ActionRow, Facts, GotoNode, RunRow, Signal, StepNode } from '../types';
-import { between, stepActions } from '../workflows/tree';
-import { Flow, Jump } from './flow';
+import { ActionRow, Facts, GotoNode, OutboxItem, RunRow, Signal, StepNode } from '../types';
+import { between, renderInline, stepActions } from '../workflows/tree';
+import { checkAnswer, chooseByRules, RETRY } from './blocks';
+import { AskNode, Flow, Jump, SayNode } from './flow';
 import { loadRun, saveRun } from './context';
 import { addEvent } from './events';
 
@@ -15,6 +16,8 @@ export type Decision =
   | { kind: 'error'; nodeId: string; error: string }
   | { kind: 'case'; nodeId: string; caseId: string | null; reason: string }
   | { kind: 'goto'; nodeId: string }
+  | { kind: 'say'; nodeId: string }
+  | { kind: 'ask'; nodeId: string; answer: { value: string | number } | null; invalid: boolean }
   | { kind: 'step'; nodeId: string; d: StepDecision };
 
 export type ActOutcome =
@@ -35,6 +38,21 @@ export async function decide(runId: string): Promise<Decision> {
   if (!nodeId) return { kind: 'end' };
   const node = ctx.flow.node(nodeId)!;
   if (node.type === 'goto') return { kind: 'goto', nodeId }; // no AI: a jump is deterministic
+  if (node.type === 'say') return { kind: 'say', nodeId };   // text bubble: sent as written
+  if (node.type === 'ask') {
+    // Input block: once it has asked, the customer's next message is the answer.
+    const asked = ctx.run.facts.asked?.[nodeId];
+    const reply = asked && [...ctx.messages].reverse().find((m) => m.role === 'customer' && !!m.created_at && new Date(m.created_at).toISOString() > asked);
+    if (!reply) return { kind: 'ask', nodeId, answer: null, invalid: false };
+    const v = checkAnswer(node.format, reply.text ?? '');
+    await addEvent(runId, nodeId, 'system', v.ok ? 'input_received' : 'input_invalid', { [node.saveAs]: v.ok ? v.value : reply.text, format: node.format });
+    return { kind: 'ask', nodeId, answer: v.ok ? { value: v.value } : null, invalid: !v.ok };
+  }
+  if (node.type === 'branch' && node.mode === 'rules') {
+    const c = chooseByRules(node, { ...ctx.vars, ...ctx.run.facts.collected });
+    await addEvent(runId, nodeId, 'system', 'case_chosen', c);
+    return { kind: 'case', nodeId, caseId: c.case_id, reason: c.reason };
+  }
   // A step repeated by Go to step gets a marker in the transcript: keep known answers and ask only for what is
   // missing (default), or start over ("Ask again"). Older runs stored a plain timestamp, which meant start over.
   const raw = ctx.run.facts.since?.[nodeId];
@@ -81,6 +99,9 @@ export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }
     if (!action?.enabled) return { status: 'invalid', error: `${key} is disabled` };
     const v = validateArgs(action, dec.d.action?.args);
     if (!v.ok) return { status: 'invalid', error: v.error };
+    // The step already ran its action (it came back to report the result): don't run it twice.
+    const done = ctx.run.facts.outputs[dec.nodeId] as Record<string, unknown> | undefined;
+    if (done && !('approval_task_id' in done)) return { status: 'done', output: done };
     await addEvent(runId, dec.nodeId, 'ai', 'action_called', { key, args: v.args });
 
     if (key === 'escalate_to_human') return { status: 'escalated', reason: String(v.args.reason ?? '') };
@@ -113,7 +134,7 @@ export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }
 
 // ③ Apply the decision to run state: facts, cursor, status. Returns what the loop does next.
 export async function advance(runId: string, dec: Decision, out: ActOutcome | null): Promise<Next> {
-  const { run, flow } = await loadRun(runId);
+  const { run, flow, vars } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
   const finish = async (status: RunRow['status'], reason: string): Promise<Next> => {
@@ -159,6 +180,35 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     await saveRun(runId, { ...r, status: 'running' });
     return { next: 'continue' };
   }
+  if (dec.kind === 'say') {
+    const text = renderInline((flow.node(dec.nodeId) as SayNode).content, vars);
+    if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
+    return moveOn(dec.nodeId);
+  }
+  if (dec.kind === 'ask') {
+    const node = flow.node(dec.nodeId) as AskNode;
+    if (dec.answer) {
+      r.facts.collected[node.saveAs] = dec.answer.value;
+      (r.facts.collectedBy ??= {})[dec.nodeId] = [node.saveAs];
+      r.facts.outputs[dec.nodeId] = { [node.saveAs]: dec.answer.value };
+      delete r.facts.asked?.[dec.nodeId]; // answer used: a later visit asks again
+      return moveOn(dec.nodeId);
+    }
+    r.facts.attempts[dec.nodeId] = (r.facts.attempts[dec.nodeId] ?? 0) + 1;
+    if (r.facts.attempts[dec.nodeId] > 3) {
+      r.outbox.push('I am handing this to a teammate who will reply shortly.');
+      return finish('escalated', 'no valid answer after 3 tries');
+    }
+    // An empty prompt is fine: the text bubble before it usually asks the question.
+    const text = dec.invalid ? node.retry?.trim() || RETRY[node.format] : renderInline(node.prompt, vars);
+    if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
+    (r.facts.asked ??= {})[dec.nodeId] = new Date().toISOString();
+    r.waiting_for = { type: 'customer', node_id: dec.nodeId, expects: [node.saveAs], remind_at: now + config.remindAfterSec * 1000,
+                      expires_at: now + config.expireAfterSec * 1000, reminded: false };
+    await saveRun(runId, { ...r, status: 'waiting_customer' });
+    await addEvent(runId, dec.nodeId, 'system', 'waiting', { for: 'customer', expects: [node.saveAs] });
+    return { next: 'wait', deadline: r.waiting_for.remind_at };
+  }
 
   const { d, nodeId } = dec;
   Object.assign(r.facts.collected, d.collected ?? {});
@@ -192,7 +242,14 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
 
   // call_action
   if (!out) return fail(nodeId, 'no action outcome');
-  if (out.status === 'done') { r.facts.outputs[nodeId] = out.output; say(d.message); return moveOn(nodeId); }
+  if (out.status === 'done') {
+    const first = !(nodeId in r.facts.outputs);
+    r.facts.outputs[nodeId] = out.output;
+    // Nothing said yet: run the step once more so the AI can tell the customer what the result means.
+    if (first && !d.message?.trim()) { await saveRun(runId, { ...r, status: 'running' }); return { next: 'continue' }; }
+    say(d.message);
+    return moveOn(nodeId);
+  }
   if (out.status === 'escalated') { say(d.message || 'I am handing this to a teammate who will reply shortly.'); return finish('escalated', out.reason); }
   if (out.status === 'failed') return fail(nodeId, out.error);
   if (out.status === 'invalid') {
@@ -213,17 +270,33 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   return { next: 'wait', deadline: r.waiting_for.due_at };
 }
 
-// ④ Send everything this turn produced as one bot message.
+// ④ Send what this turn produced, in order: AI notes in a row merge into one reply; text bubbles go out as written.
 export async function flush(runId: string): Promise<string | null> {
   const run = await one<RunRow>('select * from workflow_run where id = $1', [runId]);
   if (!run?.outbox.length) return null;
-  let text: string;
-  try { text = await compose(run.outbox); } catch { text = run.outbox.join('\n\n'); }
-  const m = await one<{ id: string }>(`insert into message (conversation_id, role, text, run_id) values ($1, 'bot', $2, $3) returning id`,
-    [run.conversation_id, text, runId]);
+  const parts: { text: string; verbatim: boolean; nodeId?: string }[] = [];
+  let notes: string[] = [];
+  const merge = async () => {
+    if (!notes.length) return;
+    let text: string;
+    try { text = await compose(notes); } catch { text = notes.join('\n\n'); }
+    parts.push({ text, verbatim: false });
+    notes = [];
+  };
+  for (const item of run.outbox as OutboxItem[]) {
+    if (typeof item === 'string') notes.push(item);
+    else { await merge(); parts.push({ text: item.text, verbatim: true, nodeId: item.nodeId }); }
+  }
+  await merge();
+  let last: string | null = null;
+  for (const p of parts) {
+    const m = await one<{ id: string }>(`insert into message (conversation_id, role, text, run_id) values ($1, 'bot', $2, $3) returning id`,
+      [run.conversation_id, p.text, runId]);
+    await addEvent(runId, p.nodeId ?? run.current_node_id, p.verbatim ? 'system' : 'ai', 'message_sent', { text: p.text });
+    last = m!.id;
+  }
   await q(`update workflow_run set outbox = '[]'::jsonb where id = $1`, [runId]);
-  await addEvent(runId, run.current_node_id, 'ai', 'message_sent', { text });
-  return m!.id;
+  return last;
 }
 
 // ⑤ Apply one signal (or a timer when recv timed out) through the run state machine.
@@ -340,6 +413,7 @@ function rerun(r: RunRow, key: string, max: number | undefined, fresh: boolean |
   for (const id of ids) {
     if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
     delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
+    delete r.facts.asked?.[id];
     r.facts.since[id] = { at, fresh: !!fresh };
     // "Ask again": the customer's earlier answers to these steps no longer count.
     if (fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];

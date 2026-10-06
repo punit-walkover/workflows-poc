@@ -119,7 +119,8 @@ function Chat({ state, onChanged }: { state: State; onChanged: () => void }) {
 
   const last = state.messages.filter((m) => m.role !== 'system').at(-1);
   const run = state.runs[0];
-  const thinking = last?.role === 'customer' && (!run || !['waiting_customer', 'waiting_approval', 'paused', 'escalated'].includes(run.status));
+  // Only while a run is actually working (or routing hasn't started one yet); a finished run never "works".
+  const thinking = last?.role === 'customer' && (!run || run.status === 'running');
   const pending = state.approvals.filter((t) => t.status === 'pending').length;
 
   const send = async () => {

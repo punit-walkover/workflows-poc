@@ -1,18 +1,21 @@
 'use client';
 
 import { createContext, useContext } from 'react';
-import type { EdgeFrom, WorkflowGraph } from '@/lib/graph';
+import type { GraphItem, WorkflowGraph } from '@/lib/graph';
 
-// Shared by the canvas and its cards: the graph, edits, the endpoint registry and connection state.
+// Where a dragged step would land: before `index` in a group.
+export type DropSlot = { groupId: string; index: number } | null;
+
+// Shared by the canvas, its group nodes and its arrows.
 export interface CanvasCtx {
   graph: WorkflowGraph;
   update: (fn: (g: WorkflowGraph) => WorkflowGraph, opts?: { transient?: boolean }) => void;
-  scale: number;
   actions: { key: string; name: string; enabled: boolean }[];
   variables: { key: string; label: string }[];
-  register: (key: string) => (el: HTMLElement | null) => void; // endpoints report their element; arrows are measured from them
-  startConnect: (from: EdgeFrom, e: React.PointerEvent) => void;
-  connecting: boolean;
+  loops: Set<string>;                                           // arrows that sit on a loop
+  selectEdge: (id: string) => void;
+  startItemDrag: (e: React.PointerEvent, drag: { itemId: string } | { make: () => GraphItem; label: string }) => void;
+  dropSlot: DropSlot;                                           // shown as a line while dragging a step
   highlight?: { current?: string | null; done?: Set<string> };
   readOnly?: boolean;
 }

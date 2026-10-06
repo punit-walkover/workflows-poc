@@ -174,9 +174,13 @@ function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView;
               <div key={it.id} className={`my-0.5 flex gap-2 rounded-md border px-1.5 py-1 ${current ? 'border-warn bg-warn-soft/60 font-medium shadow-sm' : 'border-transparent'}`}>
                 <span className="mt-0.5 shrink-0">{icon}</span>
                 <span className="leading-snug">
-                  {it.type === 'step' ? <InlineText content={it.content} /> : (
-                    <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise' : <InlineText content={chosen.condition} />}</span>}</>
-                  )}
+                  {it.type === 'step' ? <InlineText content={it.content} />
+                    : it.type === 'bubble' ? <span className="text-ink-2">Says: “<InlineText content={it.content} />”</span>
+                    : it.type === 'input' ? <>Asks for <span className="font-mono text-var">{it.saveAs || '…'}</span>
+                        {run.facts.collected?.[it.saveAs] !== undefined && done && <span className="text-ok"> = {String(run.facts.collected[it.saveAs])}</span>}</>
+                    : <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise'
+                        : it.mode === 'rules' ? (chosen.rules ?? []).map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(chosen.join === 'or' ? ' or ' : ' and ')
+                        : <InlineText content={chosen.condition} />}</span>}</>}
                 </span>
               </div>
             );
@@ -197,7 +201,7 @@ function findNode(list: WorkflowNode[], id: string): WorkflowNode | null {
 
 const LABEL: Record<string, string> = {
   run_started: 'Run started', llm_decision: 'Model decided', case_chosen: 'Branch chosen', action_called: 'Action called',
-  action_result: 'Action result', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
+  action_result: 'Action result', input_received: 'Answer saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
   message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
   run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
   error: 'Error', invalid_action: 'Invalid action',
