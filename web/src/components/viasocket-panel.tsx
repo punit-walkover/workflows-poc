@@ -13,8 +13,15 @@ const META = { type: 'tool', createFrom: 'workflows-poc' };
 
 export interface Tool {
   key: string; name: string; description: string; requires_approval: boolean; enabled: boolean; via_flow_id: string | null;
+  input_schema?: { properties?: Record<string, unknown> };
 }
 
+// A whole app enabled as one AI tool (inputs action_name + instructions) isn't a flow viaSocket can open by id;
+// it lives on the builder's home screen under Enabled Integrations.
+const flowToOpen = (t: Tool | null) => {
+  const p = t?.input_schema?.properties ?? {};
+  return 'action_name' in p && 'instructions' in p ? undefined : t?.via_flow_id ?? undefined;
+};
 type Embed = { on: (e: 'flow', fn: (f: any) => void) => void; destroy: () => void };
 declare global {
   interface Window { viaSocket?: { mount: (o: { embedToken: string; parent: HTMLElement; config?: object; open?: object }) => Embed } }
@@ -69,9 +76,10 @@ export function ToolDialog({ tool: initial, onClose, onChanged }: { tool: Tool |
       try {
         const [{ token }] = await Promise.all([api<{ token: string }>('/integrations/builder-token'), loadScript()]);
         if (cancelled || !host.current || !window.viaSocket) return;
-        // Edit: open the tool's own flow. New: skip viaSocket's home list (showEnabled: false) and land on "Add New Tool".
-        embed = window.viaSocket.mount({ embedToken: token, parent: host.current, config: { pageheading: 'Tool', ...(initial ? {} : { showEnabled: false }) },
-                                         open: { flowId: initial?.via_flow_id ?? undefined, meta: META } });
+        // New tools: directFlow shows "Customized Tools → Add new Custom Tool" (a flow with specific, configured app
+        // actions) next to the app-as-AI-tool option. It also starts a draft flow, so editing doesn't use it.
+        embed = window.viaSocket.mount({ embedToken: token, parent: host.current, config: { pageheading: 'Tool', ...(initial ? {} : { directFlow: true }) },
+                                         open: { flowId: flowToOpen(initial), meta: META } });
         embed.on('flow', async (f) => {
           if (!['published', 'updated', 'paused', 'deleted', 'delete'].includes(f?.action) || !f.webhookurl) return; // drafts stay drafts
           try {

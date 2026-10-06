@@ -21,4 +21,5 @@ export const config = {
   maxSteps: 15,
   maxDepth: 2,
   maxVisits: 100, // Go to step: most times a target may run
+  maxGraphSteps: 50, // canvas workflows can be larger than list ones
 };

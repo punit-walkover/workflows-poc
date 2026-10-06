@@ -18,10 +18,12 @@
     "@tiptap/pm": "^3.31.3",
     "@tiptap/react": "^3.31.3",
     "@tiptap/suggestion": "^3.31.3",
+    "@use-gesture/react": "^10.3.1",
     "lucide-react": "^1.46.0",
     "next": "16.3.5",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "svg-round-corners": "^0.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

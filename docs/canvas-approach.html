@@ -1,0 +1,336 @@
+<title>Workflow Canvas Approach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column with a sticky contents rail on wide screens; dotted canvas grid as the one motif. */
+:root {
+  --bg: #f6f7fa; --panel: #ffffff; --ink: #1b2130; --ink-2: #4a5468; --line: #dfe3ec;
+  --brand: #2f5fd0; --brand-soft: #e7eefc; --loop: #2f5fd0; --warn: #b7791f; --warn-soft: #fdf3e1; --ok: #23824f; --ok-soft: #e4f4ea;
+  --dot: #d5dae6;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #12151c; --panel: #1a1f29; --ink: #e6e9f0; --ink-2: #a5adbf; --line: #2c3342;
+  --brand: #7fa2ff; --brand-soft: #1f2a45; --loop: #7fa2ff; --warn: #e3b25c; --warn-soft: #3a2f1a; --ok: #6fd19a; --ok-soft: #173326; --dot: #262c39; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #12151c; --panel: #1a1f29; --ink: #e6e9f0; --ink-2: #a5adbf; --line: #2c3342;
+  --brand: #7fa2ff; --brand-soft: #1f2a45; --loop: #7fa2ff; --warn: #e3b25c; --warn-soft: #3a2f1a; --ok: #6fd19a; --ok-soft: #173326; --dot: #262c39; color-scheme: dark }
+
+* { box-sizing: border-box }
+body { background: var(--bg); color: var(--ink); font: 17px/1.65 var(--body); padding-inline: 16px; padding-block: 0 64px }
+.wrap { max-width: 1060px; margin: 0 auto; display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 48px }
+@media (max-width: 860px) { .wrap { grid-template-columns: minmax(0, 1fr) } nav.toc { display: none } }
+
+header.hero { max-width: 1060px; margin: 0 auto 40px; padding-block: 48px 32px; border-bottom: 1px solid var(--line);
+  background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 22px 22px; }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--brand) }
+h1 { font: 700 clamp(32px, 5vw, 48px)/1.1 var(--display); margin: 12px 0 14px; text-wrap: balance; letter-spacing: -.01em }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 62ch; margin: 0 }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 20px }
+.chip { font: 500 12px/1 var(--mono); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2) }
+.chip.ok { color: var(--ok); background: var(--ok-soft); border-color: transparent }
+
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 24px); align-self: start; font: 14px/1.5 var(--display) }
+nav.toc ol { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; counter-reset: s }
+nav.toc a { color: var(--ink-2); text-decoration: none; display: flex; gap: 8px }
+nav.toc a::before { counter-increment: s; content: counter(s); font: 12px/1.6 var(--mono); color: var(--brand); width: 16px }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink) }
+
+main { min-width: 0 }
+section { padding-block: 8px 28px; border-bottom: 1px solid var(--line); margin-bottom: 28px }
+section:last-child { border-bottom: 0 }
+h2 { font: 700 26px/1.25 var(--display); margin: 0 0 12px; text-wrap: balance }
+h3 { font: 600 18px/1.3 var(--display); margin: 24px 0 8px }
+p, li { max-width: 68ch }
+p { margin: 0 0 12px }
+ul, ol { padding-left: 22px; margin: 0 0 12px }
+li { margin-bottom: 4px }
+code { font: 14px var(--mono); background: var(--brand-soft); color: var(--ink); padding: 1px 5px; border-radius: 4px }
+pre { font: 13.5px/1.55 var(--mono); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; overflow-x: auto; margin: 0 0 14px }
+pre code { background: none; padding: 0 }
+a { color: var(--brand) }
+a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px }
+
+.scroll { overflow-x: auto; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel) }
+table { border-collapse: collapse; width: 100%; font-size: 15px; min-width: 560px }
+th, td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font: 600 12px/1.3 var(--display); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); background: var(--bg) }
+tr:last-child td { border-bottom: 0 }
+td code { white-space: nowrap }
+
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 12px 16px; border-radius: 0 8px 8px 0; margin: 0 0 14px; max-width: 72ch }
+.note strong { font-family: var(--display) }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0 0 14px }
+.pill { display: inline-block; font: 500 12px/1.4 var(--mono); padding: 1px 7px; border-radius: 99px }
+.pill.done { background: var(--ok-soft); color: var(--ok) }
+.pill.todo { background: var(--warn-soft); color: var(--warn) }
+
+/* A tiny drawing of a canvas card, so readers can picture the pieces named in the text. */
+.mini { display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start; padding: 20px; margin: 0 0 14px; border-radius: 8px; border: 1px solid var(--line);
+  background-color: var(--bg); background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 18px 18px }
+.card { width: 230px; max-width: 100%; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; font: 13px/1.4 var(--display); position: relative }
+.card .h { padding: 8px 12px; font-weight: 600; display: flex; gap: 6px; align-items: center }
+.card .tag { font-size: 10px; text-transform: uppercase; background: var(--ok-soft); color: var(--ok); padding: 0 5px; border-radius: 4px }
+.card .it { margin: 0 8px 6px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px; position: relative }
+.card .it.cur { border-color: var(--warn); background: var(--warn-soft) }
+.card .case { display: flex; gap: 6px; align-items: center; margin-top: 4px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; position: relative }
+.card .k { font-size: 10px; font-weight: 600; color: var(--brand); background: var(--brand-soft); padding: 0 5px; border-radius: 4px }
+.card .f { border-top: 1px solid var(--line); padding: 5px 12px; text-align: right; color: var(--ink-2); font-size: 11px; position: relative }
+.port { position: absolute; right: -8px; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel) }
+.port::after { content: ""; position: absolute; inset: 3px; border-radius: 50%; border: 2px solid var(--brand) }
+.legend { font: 13px/1.5 var(--display); color: var(--ink-2); display: grid; gap: 4px; min-width: 0; flex: 1 1 220px }
+@media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto } }
+</style>
+
+<header class="hero">
+  <div class="eyebrow">Ticket0 · Workflows POC · Approach</div>
+  <h1>Workflow Canvas Approach</h1>
+  <p class="lede">How the Typebot-style canvas works in the Workflows POC. It covers the editor where you draw a workflow, the graph that gets saved, and how the runner follows the arrows during a live chat.</p>
+  <div class="meta">
+    <span class="chip">server: NestJS + DBOS · :4001</span>
+    <span class="chip">web: Next.js 16 · :4000</span>
+    <span class="chip ok">Built and tested end to end</span>
+    <span class="chip">Not committed yet</span>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <ol>
+    <li><a href="#why">Why a canvas</a></li>
+    <li><a href="#model">The saved graph</a></li>
+    <li><a href="#editor">The editor</a></li>
+    <li><a href="#runtime">Running a graph</a></li>
+    <li><a href="#loops">Loops and limits</a></li>
+    <li><a href="#rules">Validation rules</a></li>
+    <li><a href="#convert">List to canvas</a></li>
+    <li><a href="#typebot">What came from Typebot</a></li>
+    <li><a href="#files">Files</a></li>
+    <li><a href="#tested">What was tested</a></li>
+    <li><a href="#next">Open items</a></li>
+  </ol>
+</nav>
+
+<main>
+<section id="why">
+  <h2>Why a canvas</h2>
+  <p>Until now, a workflow was a list: steps, conditions with nested steps, and "Go to step" jumps. A list is fine for straight procedures. It gets hard to read once a flow branches, joins back together, or loops.</p>
+  <p>The canvas shows the same procedure as cards joined by arrows, like Typebot. You can see the whole flow at once, every branch has its own arrow, and loops show up as dashed blue arrows with their repeat limit printed next to them.</p>
+  <p>Both kinds of workflow keep working. A workflow with a saved <code>graph</code> opens in the canvas and runs as a graph. A workflow without one stays in the list editor and runs as before. The "Open in canvas" button converts a list workflow once.</p>
+</section>
+
+<section id="model">
+  <h2>The saved graph</h2>
+  <p>The canvas saves one JSON object. Migration <code>0007_workflow_graph.sql</code> adds a nullable <code>graph jsonb</code> column to both <code>workflow</code> (the draft) and <code>workflow_version</code> (the published copy). Publishing copies the graph into the new version, the same way it copies <code>steps</code>.</p>
+<pre><code>WorkflowGraph {
+  start:  string                      // id of the Start group
+  groups: GraphGroup[]                // the cards
+  edges:  GraphEdge[]                 // the arrows
+}
+GraphGroup { id, title, x, y, items: GraphItem[] }
+GraphItem  = { id, type: 'step', content: Inline[] }
+           | { id, type: 'condition', cases: { id, kind: 'if'|'else_if'|'else', condition: Inline[] }[] }
+GraphEdge  {
+  id,
+  from: { groupId, itemId?, port? }   // a group's end, or one case of a condition
+  to:   { groupId, itemId? }          // a whole group, or one step inside it
+  maxVisits?: number                  // repeat limit, 1 to 100 (loops only)
+  fresh?: boolean                     // "ask again": forget answers on each repeat
+}</code></pre>
+  <h3>The pieces on a card</h3>
+  <div class="mini" aria-label="Drawing of a canvas card">
+    <div class="card">
+      <div class="h"><span class="tag">Start</span> Start</div>
+      <div class="it">Ask for the order ID and email.</div>
+      <div class="it cur">Use <b>@lookup_order</b> to find the order.</div>
+      <div class="it"><div style="font-size:10px;font-weight:600;color:var(--brand)">CONDITION</div>
+        <div class="case"><span class="k">If</span> delivered in 30 days <span class="port"></span></div>
+        <div class="case"><span class="k">Else</span> otherwise <span class="port"></span></div>
+      </div>
+      <div class="f">then <span class="port"></span></div>
+    </div>
+    <div class="legend">
+      <div><b>Group (card):</b> a run of steps that happen in order. You drag it by its header.</div>
+      <div><b>Step:</b> one instruction for the AI. It can mention <code>@actions</code> and <code>{{variables}}</code>.</div>
+      <div><b>Condition:</b> a list of cases. Each case has its own output dot.</div>
+      <div><b>"then" dot:</b> where the run goes after the group's last item.</div>
+      <div><b>Yellow box:</b> the step that is running right now (in the run panel).</div>
+    </div>
+  </div>
+  <p>Arrows start from a dot: either a group's "then" dot or one case of a condition. An output has at most one arrow, and drawing a new one replaces the old. An arrow can land on the top of a card (start that group) or on a single step inside a card (start partway through it). Landing on a step is what lets "Go to step" point anywhere, forward or back.</p>
+  <p>Item ids are kept when a list workflow is converted. That way facts, run events and the step highlight in old runs still line up.</p>
+</section>
+
+<section id="editor">
+  <h2>The editor</h2>
+  <p>The canvas is a plain <code>div</code> moved with a CSS <code>transform: translate(x, y) scale(z)</code>. Cards sit inside it at their saved <code>x, y</code>. An SVG layer under the cards draws the arrows. This is the same approach Typebot uses, and no canvas library is needed.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Feature</th><th>How it works</th></tr></thead>
+    <tbody>
+      <tr><td>Pan</td><td>Drag empty space (<code>@use-gesture</code> <code>useDrag</code>), or scroll the mouse wheel.</td></tr>
+      <tr><td>Zoom</td><td>Ctrl/⌘ + wheel zooms around the cursor (30% to 160%). The toolbar has −, +, Fit and Tidy up.</td></tr>
+      <tr><td>Move a card</td><td>Drag its header. The first move saves an undo point and the rest of the drag doesn't, so one drag is one undo.</td></tr>
+      <tr><td>Draw an arrow</td><td>Press on a dot and drag. A preview line follows the cursor. Release on a card (<code>data-drop="group:…"</code>) or on a step (<code>data-drop="item:…"</code>).</td></tr>
+      <tr><td>Add items</td><td>"+ Step" and "+ Condition" on a card, or drag Step/Condition from the left palette. Dropping on a card adds the item to it. Dropping on empty canvas makes a new card.</td></tr>
+      <tr><td>Arrow settings</td><td>Click an arrow or its "↺" label. A small panel sets the repeat limit and "ask again", and has Delete. Delete/Backspace also removes the selected arrow.</td></tr>
+      <tr><td>Tidy up</td><td>Puts cards in columns by distance from Start, then stacks each column using the real card heights from the page.</td></tr>
+      <tr><td>Undo / redo</td><td>Header buttons, or Ctrl+Z and Ctrl+Shift+Z. These are skipped while you are typing in a field.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>How arrows find their ends</h3>
+  <p>Every dot and every drop point registers its element under a key, such as <code>src:&lt;groupId&gt;</code>, <code>src:&lt;itemId&gt;:&lt;caseId&gt;</code> or <code>tgt:&lt;itemId&gt;</code>. After each render, the canvas measures each element's height inside its card, and a ResizeObserver measures again when a card grows. An arrow is then drawn from the source card's x and that y offset to the target's. The path is orthogonal (2 to 5 straight segments) with rounded corners. That drawing code is the part ported from Typebot.</p>
+  <h3>Editing helpers</h3>
+  <p>All edits go through small pure functions in <code>web/src/lib/graph.ts</code>, such as <code>connect</code>, <code>removeItem</code> and <code>addCase</code>. Each takes a graph and returns a new one. Undo is just a stack of earlier graphs. Removing a card, a step or a case also removes every arrow that touched it, so no arrow is ever left pointing at nothing.</p>
+</section>
+
+<section id="runtime">
+  <h2>Running a graph</h2>
+  <p>The runner itself didn't change: it is still the durable DBOS loop <b>decide → act → advance → flush → wait → apply</b>. What changed is how it finds the next step. That now goes through a small <code>Flow</code> interface, with one version for lists and one for graphs.</p>
+<pre><code>interface Flow {
+  kind: 'tree' | 'graph'
+  first(): string                          // first item to run
+  node(id): Node                           // a step or a condition
+  next(id): Jump                           // after a step finishes
+  afterCase(id, caseId): Jump              // after a condition picks a case
+}
+type Jump = { to: string | null; edge?: GraphEdge }
+flowOf(version) = version.graph ? graphFlow(version.graph) : treeFlow(version.steps)</code></pre>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  A[Step finishes] --> B{More items in this group?}
+  B -- yes --> C[Next item in the group]
+  B -- no --> D{Group has a 'then' arrow?}
+  D -- yes --> E[Follow the arrow]
+  D -- no --> F[Run completes]
+  G[Condition picks a case] --> H{Case has an arrow?}
+  H -- yes --> E
+  H -- no --> B
+  E --> I{Target already ran in this run?}
+  I -- no --> J[Go to target]
+  I -- yes --> K[Loop back: count the visit, check the limit]
+  </pre></div>
+  <ul>
+    <li><b>Inside a group</b>, items run top to bottom.</li>
+    <li><b>At the end of a group</b>, the run follows the group's "then" arrow. If there's no arrow, the run is done.</li>
+    <li><b>A condition</b> uses the same AI case chooser as list workflows. Each case is judged true or false, then the run follows the chosen case's arrow. If that case has no arrow, the run carries on to the next item in the group.</li>
+    <li><b>Approvals</b> work the same way: when the team decides, the runner calls <code>next()</code> from the step that was waiting.</li>
+  </ul>
+  <p>The playground's run panel draws a graph run as a list of groups, with Start first. The running step gets the yellow box, finished steps get a ✓, and conditions show the case that was chosen.</p>
+</section>
+
+<section id="loops">
+  <h2>Loops and limits</h2>
+  <p>A graph can loop. In the damaged-item example, if the photo is unclear the run goes back to "ask for a photo". The runner tells a loop from a normal forward move with a <b>trail</b>: a list in the run's facts of every item that has finished.</p>
+  <ol>
+    <li>When the runner follows an arrow to an item that is already on the trail, that arrow is a loop back.</li>
+    <li>The visit counter for that arrow goes up. If it goes over the arrow's <code>maxVisits</code>, the run ends with the reason <code>loop_limit</code> instead of looping forever.</li>
+    <li>The facts for the steps being repeated are cleared, and those items are taken off the trail.</li>
+    <li>With "ask again" on, earlier answers are forgotten, so the AI asks the customer fresh. With it off, the AI keeps what it knows and sees the earlier results as "previous".</li>
+    <li>The transcript is marked with a <code>since</code> point, so the AI knows which messages belong to the new pass.</li>
+  </ol>
+  <p>The limit can be 1 to 100, the same as "Go to step" in the list editor. On the canvas, loop arrows are dashed blue and labelled "↺ max N", or "↺ no limit" until one is set.</p>
+</section>
+
+<section id="rules">
+  <h2>Validation rules</h2>
+  <p><code>validateGraph</code> runs when you save and blocks publishing until there are no issues. The editor shows the same issues as notices.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Rule</th><th>Message the user sees</th></tr></thead>
+    <tbody>
+      <tr><td>Every card has at least one item</td><td>"Group": add at least one step</td></tr>
+      <tr><td>No empty steps or conditions</td><td>a step is empty / a condition is empty</td></tr>
+      <tr><td>Conditions start with If, and Else is last</td><td>a condition must start with If / Else must be last</td></tr>
+      <tr><td>Every card can be reached from Start</td><td>"Group" can't be reached from the start</td></tr>
+      <tr><td>One arrow per output</td><td>one output has two arrows</td></tr>
+      <tr><td>Arrows point at things that exist</td><td>an arrow points to a group / step / case that no longer exists</td></tr>
+      <tr><td>Every loop has a limit somewhere</td><td>Loop through … needs a repeat limit on one of its arrows</td></tr>
+      <tr><td>Repeat limit is 1 to 100</td><td>repeat limit must be 1 to 100</td></tr>
+      <tr><td>At most 50 steps</td><td>Too many steps: N of 50</td></tr>
+      <tr><td>Actions are enabled and variables are known</td><td>@key doesn't exist or is disabled / Unknown variable</td></tr>
+    </tbody>
+  </table></div>
+  <p>Loops are found with Tarjan's algorithm for strongly connected components. A group of cards that can all reach each other is one loop, and at least one arrow inside it must have a limit. That is enough to guarantee every run ends.</p>
+</section>
+
+<section id="convert">
+  <h2>List to canvas</h2>
+  <p><code>POST /workflows/:id/canvas</code> runs <code>treeToGraph(steps)</code>, saves the result as the draft's graph, and the page reloads into the canvas.</p>
+  <ul>
+    <li>Steps go into the current card in order.</li>
+    <li>A condition ends its card. Each case's steps get their own card, titled with the first few words of the case. A "Then" card holds whatever came after the condition, and every case joins it.</li>
+    <li>A "Go to step" becomes an arrow to the target step, with the same limit and "ask again" setting. If a case holds only a Go to step, its arrow starts directly from that case.</li>
+    <li>Empty "Then" cards are skipped: arrows into them go straight to where they lead.</li>
+    <li>Cards are laid out in columns by distance from Start (400px apart), then stacked using an estimated card height.</li>
+  </ul>
+  <p>Both built-in templates convert with no validation issues.</p>
+</section>
+
+<section id="typebot">
+  <h2>What came from Typebot</h2>
+  <p>Typebot was used as a reference for how its canvas works. Only one small piece of code was adapted: the arrow path drawing in <code>web/src/components/canvas/edge-path.ts</code>, which carries an attribution comment. Everything else was written fresh with the same approach.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Idea</th><th>Typebot</th><th>This POC</th></tr></thead>
+    <tbody>
+      <tr><td>Canvas</td><td>CSS transform + <code>@use-gesture</code></td><td>Same (MIT library)</td></tr>
+      <tr><td>Arrow corners</td><td><code>svg-round-corners</code></td><td>Same (MIT library)</td></tr>
+      <tr><td>Arrow paths</td><td>Orthogonal path maths</td><td>Adapted, with attribution</td></tr>
+      <tr><td>Endpoints</td><td>Registry of measured dot positions</td><td>Same idea, own code</td></tr>
+      <tr><td>Text in steps</td><td>Plate editor</td><td>Our existing TipTap step editor</td></tr>
+      <tr><td>State</td><td>zustand stores</td><td>React state + pure helpers</td></tr>
+    </tbody>
+  </table></div>
+  <div class="note"><strong>License.</strong> Typebot is under FSL-1.1-ALv2. It allows non-commercial and educational use, which covers this learning POC. It does not allow using the code in a competing commercial product until each release turns Apache 2.0 two years later. Keep <code>edge-path.ts</code> out of commercial Ticket0, or rewrite it from scratch before moving the canvas there.</div>
+</section>
+
+<section id="files">
+  <h2>Files</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>File</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><code>server/migrations/0007_workflow_graph.sql</code></td><td>Adds <code>graph jsonb</code> to <code>workflow</code> and <code>workflow_version</code></td></tr>
+      <tr><td><code>server/src/types.ts</code></td><td>Graph types, plus <code>trail</code> in run facts</td></tr>
+      <tr><td><code>server/src/workflows/graph.ts</code></td><td><code>treeToGraph</code>, <code>layout</code>, <code>cycles</code>, <code>validateGraph</code></td></tr>
+      <tr><td><code>server/src/runner/flow.ts</code></td><td><code>Flow</code>, <code>treeFlow</code>, <code>graphFlow</code>, <code>flowOf</code></td></tr>
+      <tr><td><code>server/src/runner/steps.ts</code></td><td><code>follow()</code> and <code>rerun()</code>: trail, loop backs, limits</td></tr>
+      <tr><td><code>server/src/workflows/workflows.service.ts</code></td><td>Saves and validates graph or steps, publishes the graph, <code>toCanvas</code></td></tr>
+      <tr><td><code>web/src/lib/graph.ts</code></td><td>Pure editing helpers, <code>loopEdges</code>, <code>tidy</code></td></tr>
+      <tr><td><code>web/src/components/canvas/canvas.tsx</code></td><td>Pan/zoom, arrows, connecting, palette, toolbar, arrow settings</td></tr>
+      <tr><td><code>web/src/components/canvas/group-card.tsx</code></td><td>Card, items, cases, output and drop dots</td></tr>
+      <tr><td><code>web/src/components/canvas/edge-path.ts</code></td><td>Arrow path drawing (adapted from Typebot)</td></tr>
+      <tr><td><code>web/src/app/workflows/[id]/page.tsx</code></td><td>Canvas or list editor, undo/redo, "Open in canvas"</td></tr>
+      <tr><td><code>web/src/components/run-panel.tsx</code></td><td><code>GraphRun</code> view in the playground</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="tested">
+  <h2>What was tested</h2>
+  <p>The test workflow was "Canvas test (damaged item)", converted from the damaged-item template (6 cards, 6 arrows).</p>
+  <ul>
+    <li><span class="pill done">pass</span> Tidy up and Fit: no cards overlap, all 6 arrows are drawn, and the loop label shows.</li>
+    <li><span class="pill done">pass</span> Dragging a Step from the palette made a new card. Two arrows were drawn, one of them a loop back to Start, and it showed "↺ no limit".</li>
+    <li><span class="pill done">pass</span> Setting that loop's limit to 3 changed the label to "↺ max 3".</li>
+    <li><span class="pill done">pass</span> Undo stepped back through all four changes one at a time.</li>
+    <li><span class="pill done">pass</span> Save and Publish: v1 went live with the graph and no validation issues.</li>
+    <li><span class="pill done">pass</span> Live chat: routed to the canvas workflow → order looked up → the condition's arrow led to the photo card → approval requested.</li>
+    <li><span class="pill done">pass</span> Rejected as "unclear": the run followed the loop arrow back to "ask for a photo" and asked again.</li>
+    <li><span class="pill done">pass</span> Approved the second photo, then the refund: $79.99 refunded and the run completed.</li>
+    <li><span class="pill done">pass</span> The run panel showed the yellow box on the step that was running.</li>
+  </ul>
+</section>
+
+<section id="next">
+  <h2>Open items</h2>
+  <ul>
+    <li><span class="pill todo">open</span> Commit the canvas work once it has been reviewed.</li>
+    <li><span class="pill todo">open</span> After a loop back, the run panel still ticks steps from the earlier pass. It could show a visit count instead.</li>
+    <li><span class="pill todo">open</span> There's no way back from canvas to list. The conversion is one way.</li>
+    <li><span class="pill todo">open</span> Arrows can't be re-pointed by dragging their end. For now you delete the arrow and draw a new one.</li>
+    <li><span class="pill todo">open</span> No multi-select or copy/paste of cards yet.</li>
+    <li><span class="pill todo">open</span> Rewrite <code>edge-path.ts</code> from scratch before any commercial use (see the license note).</li>
+  </ul>
+</section>
+</main>
+</div>

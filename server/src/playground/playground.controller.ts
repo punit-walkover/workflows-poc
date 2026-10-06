@@ -34,7 +34,7 @@ export class PlaygroundController {
                                 filter (where a.id is not null), '[]') as attachments
                               from message m left join attachment a on a.id = any(m.attachment_ids)
                               where m.conversation_id = $1 group by m.id order by m.created_at`, [id]);
-    const runs = await q(`select r.*, v.name as workflow_name, v.version, v.steps from workflow_run r
+    const runs = await q(`select r.*, v.name as workflow_name, v.version, v.steps, v.graph from workflow_run r
                           join workflow_version v on v.id = r.workflow_version_id
                           where r.conversation_id = $1 order by r.started_at desc`, [id]);
     const events = runs[0] ? await q('select * from run_event where run_id = $1 order by id', [runs[0].id]) : [];

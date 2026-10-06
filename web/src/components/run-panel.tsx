@@ -4,11 +4,12 @@ import { useState } from 'react';
 import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, Loader2, Minus } from 'lucide-react';
 import { api, API, money } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
+import type { WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
 
 export interface RunView {
-  id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[];
+  id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
   facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; visits?: Record<string, number> };
   waiting_for: any; end_reason: string | null;
 }
@@ -60,7 +61,7 @@ export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView;
 
       <section>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Steps</div>
-        <RunTree list={run.steps} run={run} visited={visited} skipped={false} />
+        {run.graph ? <GraphRun graph={run.graph} run={run} visited={visited} /> : <RunTree list={run.steps} run={run} visited={visited} skipped={false} />}
       </section>
 
       <section>
@@ -150,6 +151,38 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
           </div>
         );
       })}
+    </div>
+  );
+}
+
+// Canvas runs: groups in reading order (start first), the step the run is on in a yellow box.
+function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView; visited: Set<unknown> }) {
+  const groups = [...graph.groups].sort((a, b) => (a.id === graph.start ? -1 : b.id === graph.start ? 1 : a.x - b.x || a.y - b.y));
+  const live = ACTIVE.includes(run.status);
+  return (
+    <div className="space-y-2">
+      {groups.map((g) => (
+        <div key={g.id} className="rounded-lg border border-line px-2 py-1.5">
+          <div className="mb-1 text-xs font-semibold text-ink-2">{g.title}</div>
+          {g.items.map((it) => {
+            const current = live && run.current_node_id === it.id;
+            const done = visited.has(it.id) && !current;
+            const icon = current ? (run.status === 'running' ? <Loader2 size={13} className="animate-spin text-action" /> : <Clock size={13} className="text-warn" />)
+              : done ? <Check size={13} className="text-ok" /> : <Circle size={13} className="text-line" />;
+            const chosen = it.type === 'condition' ? it.cases.find((c) => c.id === run.facts.cases?.[it.id]?.case_id) : undefined;
+            return (
+              <div key={it.id} className={`my-0.5 flex gap-2 rounded-md border px-1.5 py-1 ${current ? 'border-warn bg-warn-soft/60 font-medium shadow-sm' : 'border-transparent'}`}>
+                <span className="mt-0.5 shrink-0">{icon}</span>
+                <span className="leading-snug">
+                  {it.type === 'step' ? <InlineText content={it.content} /> : (
+                    <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise' : <InlineText content={chosen.condition} />}</span>}</>
+                  )}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

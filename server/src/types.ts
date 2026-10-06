@@ -9,6 +9,21 @@ export interface BranchNode { id: string; type: 'branch'; cases: BranchCase[] }
 export interface GotoNode { id: string; type: 'goto'; target: string; max_visits: number; fresh?: boolean }
 export type WorkflowNode = StepNode | BranchNode | GotoNode;
 
+// Canvas form (workflow.graph): groups of items joined by edges. Item ids are unique across the graph.
+export type GraphItem =
+  | { id: string; type: 'step'; content: Inline[] }
+  | { id: string; type: 'condition'; cases: { id: string; kind: 'if' | 'else_if' | 'else'; condition: Inline[] }[] };
+export interface GraphGroup { id: string; title: string; x: number; y: number; items: GraphItem[] }
+// from: a group's end (no itemId) or a condition case (itemId + port = case id). to: a group, or a step inside one.
+export interface GraphEdge {
+  id: string;
+  from: { groupId: string; itemId?: string; port?: string };
+  to: { groupId: string; itemId?: string };
+  maxVisits?: number; // required on edges that close a loop
+  fresh?: boolean;    // "ask again" when looping back
+}
+export interface WorkflowGraph { start: string; groups: GraphGroup[]; edges: GraphEdge[] }
+
 export interface ActionRow {
   key: string;
   name: string;
@@ -46,6 +61,7 @@ export interface Facts {
   since?: Record<string, string | { at: string; fresh: boolean }>; // node id -> when a Go to step jumped back over it
   previous?: Record<string, unknown>; // node id -> its result before the last jump back
   collectedBy?: Record<string, string[]>; // node id -> collected keys it filled
+  trail?: string[]; // canvas runs: item ids in the order they finished (finds what a loop back re-runs)
 }
 
 export type WaitingFor =

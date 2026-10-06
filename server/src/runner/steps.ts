@@ -2,8 +2,9 @@ import { config } from '../config';
 import { one, q } from '../db';
 import { executeAction, getAction, validateArgs } from '../actions/execute';
 import { chooseCase, compose, decideStep, StepDecision } from '../llm/decider';
-import { ActionRow, BranchNode, Facts, GotoNode, RunRow, Signal, StepNode } from '../types';
-import { between, nextAfter, stepActions } from '../workflows/tree';
+import { ActionRow, Facts, GotoNode, RunRow, Signal, StepNode } from '../types';
+import { between, stepActions } from '../workflows/tree';
+import { Flow, Jump } from './flow';
 import { loadRun, saveRun } from './context';
 import { addEvent } from './events';
 
@@ -32,7 +33,7 @@ export async function decide(runId: string): Promise<Decision> {
   const ctx = await loadRun(runId);
   const nodeId = ctx.run.current_node_id;
   if (!nodeId) return { kind: 'end' };
-  const node = ctx.index.get(nodeId)!.node;
+  const node = ctx.flow.node(nodeId)!;
   if (node.type === 'goto') return { kind: 'goto', nodeId }; // no AI: a jump is deterministic
   // A step repeated by Go to step gets a marker in the transcript: keep known answers and ask only for what is
   // missing (default), or start over ("Ask again"). Older runs stored a plain timestamp, which meant start over.
@@ -73,7 +74,7 @@ const visitOf = (f: Facts) => 1 + Object.values(f.visits ?? {}).reduce((a, b) =>
 export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }>): Promise<ActOutcome> {
   try {
     const ctx = await loadRun(runId);
-    const node = ctx.index.get(dec.nodeId)!.node as StepNode;
+    const node = ctx.flow.node(dec.nodeId) as StepNode;
     const key = dec.d.action?.key ?? '';
     if (!stepActions(node.content).includes(key)) return { status: 'invalid', error: `${key || 'action'} is not allowed in this step` };
     const action = await getAction(key);
@@ -112,7 +113,7 @@ export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }
 
 // ③ Apply the decision to run state: facts, cursor, status. Returns what the loop does next.
 export async function advance(runId: string, dec: Decision, out: ActOutcome | null): Promise<Next> {
-  const { run, index } = await loadRun(runId);
+  const { run, flow } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
   const finish = async (status: RunRow['status'], reason: string): Promise<Next> => {
@@ -120,14 +121,15 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     await addEvent(runId, null, 'system', status === 'completed' ? 'run_completed' : `run_${status}`, { reason });
     return { next: 'end' };
   };
-  const moveOn = async (from: string): Promise<Next> => {
-    r.current_node_id = nextAfter(index, from);
-    r.facts.attempts[from] = 0;
-    r.facts.attempts['!' + from] = 0;
-    if (!r.current_node_id) return finish('completed', 'completed');
+  const go = async (from: string, jump: Jump): Promise<Next> => {
+    const to = await follow(runId, r, flow, from, jump);
+    if (to === LIMIT) { r.outbox.push('I am handing this to a teammate who will reply shortly.'); return finish('escalated', 'loop_limit'); }
+    r.current_node_id = to;
+    if (!to) return finish('completed', 'completed');
     await saveRun(runId, { ...r, status: 'running' });
     return { next: 'continue' };
   };
+  const moveOn = (from: string) => go(from, flow.next(from));
   const fail = async (nodeId: string, error: string): Promise<Next> => {
     r.outbox.push("Sorry, I hit a problem on my side. A teammate will take a look and follow up.");
     await saveRun(runId, { ...r, status: 'failed', waiting_for: null });
@@ -139,38 +141,18 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   if (dec.kind === 'error') return fail(dec.nodeId, dec.error);
   if (dec.kind === 'case') {
     r.facts.cases[dec.nodeId] = { case_id: dec.caseId, reason: dec.reason };
-    const branch = index.get(dec.nodeId)!.node as BranchNode;
-    const chosen = branch.cases.find((c) => c.id === dec.caseId);
-    if (chosen?.steps[0]) {
-      r.current_node_id = chosen.steps[0].id;
-      await saveRun(runId, { ...r, status: 'running' });
-      return { next: 'continue' };
-    }
-    return moveOn(dec.nodeId);
+    return go(dec.nodeId, flow.afterCase(dec.nodeId, dec.caseId));
   }
   if (dec.kind === 'goto') {
-    // Jump forward (skip ahead): nothing re-runs, so just move on. Jump back (a loop): clear what the target and
-    // everything after it produced, so those steps run fresh. Both count against the repeat limit.
+    // Tree Go to step. Forward (skip ahead): nothing re-runs. Back (a loop): the target and what follows run fresh.
+    const index = flow.tree!;
     const g = index.get(dec.nodeId)!.node as GotoNode;
     const forward = (index.get(g.target)?.pos ?? -1) > index.get(g.id)!.pos;
-    r.facts.visits ??= {};
-    const visit = (r.facts.visits[g.id] ?? 1) + 1;
-    if (visit > g.max_visits) {
+    const visit = rerun(r, g.id, g.max_visits, g.fresh, forward ? [] : between(index, g.target, g.id));
+    if (visit === false) {
       r.outbox.push('I am handing this to a teammate who will reply shortly.');
       await addEvent(runId, g.id, 'system', 'goto_limit', { target: g.target, max_visits: g.max_visits });
       return finish('escalated', 'loop_limit');
-    }
-    r.facts.visits[g.id] = visit;
-    r.facts.since ??= {};
-    r.facts.previous ??= {};
-    const at = new Date().toISOString();
-    for (const id of forward ? [] : between(index, g.target, g.id)) {
-      // Last results stay visible as "previous", so the repeated steps know why the workflow came back.
-      if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
-      delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
-      r.facts.since[id] = { at, fresh: !!g.fresh };
-      // "Ask again": the customer's earlier answers to these steps no longer count.
-      if (g.fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
     }
     r.current_node_id = g.target;
     await addEvent(runId, g.id, 'system', 'goto_jumped', { target: g.target, visit, max_visits: g.max_visits, direction: forward ? 'forward' : 'back' });
@@ -185,7 +167,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
 
   if (d.decision === 'complete') {
     // A step that mentions an action only completes once that action has run.
-    const node = index.get(nodeId)!.node as StepNode;
+    const node = flow.node(nodeId) as StepNode;
     if (stepActions(node.content).length && !(nodeId in r.facts.outputs)) {
       r.facts.attempts['!' + nodeId] = (r.facts.attempts['!' + nodeId] ?? 0) + 1;
       await addEvent(runId, nodeId, 'system', 'invalid_action', { error: 'step completed without calling its action' });
@@ -246,7 +228,7 @@ export async function flush(runId: string): Promise<string | null> {
 
 // ⑤ Apply one signal (or a timer when recv timed out) through the run state machine.
 export async function apply(runId: string, s: Signal | null): Promise<Next> {
-  const { run, index } = await loadRun(runId);
+  const { run, flow } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
   const w = r.waiting_for;
@@ -311,7 +293,9 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
       } else {
         r.facts.outputs[nodeId] = { approved: s.approved, reviewed_by: s.by, reviewer_note: s.note ?? '' };
       }
-      return resumeAt(nextAfter(index, nodeId));
+      const to = await follow(runId, r, flow, nodeId, flow.next(nodeId));
+      if (to === LIMIT) return end('escalated', 'loop_limit', 'I am handing this to a teammate who will reply shortly.');
+      return resumeAt(to);
     }
 
     case 'pause':
@@ -339,6 +323,49 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
     case 'cancel':
       return end('cancelled', `cancelled by ${s.by}`);
   }
+}
+
+const LIMIT = Symbol('loop limit');
+
+// Repeat bookkeeping for a jump back: count the visit and clear what re-runs (results kept as "previous").
+// Returns the visit number, or false once a limited jump has been taken too often.
+function rerun(r: RunRow, key: string, max: number | undefined, fresh: boolean | undefined, ids: string[]): number | false {
+  r.facts.visits ??= {};
+  const visit = (r.facts.visits[key] ?? 1) + 1;
+  if (max && visit > max) return false;
+  r.facts.visits[key] = visit; // also feeds visitOf, so a re-run tool call gets a fresh idempotency key
+  r.facts.since ??= {};
+  r.facts.previous ??= {};
+  const at = new Date().toISOString();
+  for (const id of ids) {
+    if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
+    delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
+    r.facts.since[id] = { at, fresh: !!fresh };
+    // "Ask again": the customer's earlier answers to these steps no longer count.
+    if (fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
+  }
+  return visit;
+}
+
+// Leave `from` along `jump`. Canvas runs keep a trail of finished items: an arrow back to one already on it is a loop.
+async function follow(runId: string, r: RunRow, flow: Flow, from: string, jump: Jump): Promise<string | null | typeof LIMIT> {
+  r.facts.attempts[from] = 0;
+  r.facts.attempts['!' + from] = 0;
+  if (flow.kind !== 'graph') return jump.to;
+  const trail = [...(r.facts.trail ?? []), from];
+  r.facts.trail = trail;
+  if (!jump.to || !jump.edge) return jump.to;
+  const back = trail.lastIndexOf(jump.to);
+  if (back < 0) return jump.to;
+  const e = jump.edge;
+  const visit = rerun(r, e.id, e.maxVisits, e.fresh, trail.slice(back));
+  if (visit === false) {
+    await addEvent(runId, from, 'system', 'goto_limit', { target: jump.to, max_visits: e.maxVisits });
+    return LIMIT;
+  }
+  r.facts.trail = trail.slice(0, back);
+  await addEvent(runId, from, 'system', 'goto_jumped', { target: jump.to, visit, max_visits: e.maxVisits ?? null, direction: 'back' });
+  return jump.to;
 }
 
 async function openTask(run: RunRow, nodeId: string, t: {
