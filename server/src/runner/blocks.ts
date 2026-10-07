@@ -1,4 +1,4 @@
-import { BranchNode, InputFormat, Rule } from '../types';
+import { BranchNode, Facts, InputFormat, Rule, SaveField } from '../types';
 
 // Checks a customer's reply to an input block. Returns the value to save, or why it doesn't fit.
 export function checkAnswer(format: InputFormat, raw: string): { ok: true; value: string | number } | { ok: false } {
@@ -53,4 +53,32 @@ export function chooseByRules(b: BranchNode, values: Record<string, unknown>): {
     if (hit) return { case_id: c.id, reason: rules.map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(c.join === 'or' ? ' or ' : ' and ') };
   }
   return { case_id: null, reason: 'no rule matched' };
+}
+
+// Reads a field from an action response: "delivered_at", "items[0].name", "items.0.name", "items.length".
+export function getPath(obj: unknown, path: string): unknown {
+  const keys = path.trim().replace(/\[(\d+)\]/g, '.$1').split('.').filter(Boolean);
+  let cur: any = obj;
+  for (const k of keys) {
+    if (cur === null || cur === undefined) return undefined;
+    cur = k === 'length' && (Array.isArray(cur) || typeof cur === 'string') ? cur.length : cur[k];
+  }
+  return cur;
+}
+
+// "Save response": copies the mapped fields into workflow variables. Returns what was saved and which paths were missing.
+export function saveResponse(facts: Facts, nodeId: string, save: SaveField[] | undefined, output: unknown) {
+  const saved: Record<string, unknown> = {};
+  const missing: string[] = [];
+  for (const m of save ?? []) {
+    if (!m.path || !m.var) continue;
+    const v = getPath(output, m.path);
+    if (v === undefined) { missing.push(m.path); continue; }
+    saved[m.var] = v;
+  }
+  if (Object.keys(saved).length) {
+    Object.assign((facts.vars ??= {}), saved);
+    (facts.varsBy ??= {})[nodeId] = Object.keys(saved);
+  }
+  return { saved, missing };
 }

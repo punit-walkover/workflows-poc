@@ -92,7 +92,7 @@ export function graphMentions(g: WorkflowGraph) {
   const vars = new Set<string>();
   const scan = (c: Inline[]) => c.forEach((p) => (p.t === 'action' ? actions.add(p.key) : p.t === 'var' ? vars.add(p.key) : 0));
   for (const it of allItems(g)) {
-    if (it.type === 'step' || it.type === 'bubble') scan(it.content);
+    if (it.type === 'step' || it.type === 'bubble') { scan(it.content); if (it.type === 'step') it.save?.forEach((m) => vars.add(m.var)); }
     else if (it.type === 'input') { scan(it.prompt); vars.add(it.saveAs); }
     else it.cases.forEach((c) => { scan(c.condition); c.rules?.forEach((r) => vars.add(r.var)); });
   }
@@ -137,6 +137,12 @@ export function validateGraph(g: unknown, enabledActions: string[]) {
       if (items.has(it.id)) issues.push(`"${grp.title}": duplicate item id`);
       items.set(it.id, { item: it, group: grp });
       if (it.type === 'step' && !text(it.content)) issues.push(`"${grp.title}": a step is empty`);
+      if (it.type === 'step' && it.save?.length) {
+        if (!it.content.some((p) => p.t === 'action')) issues.push(`"${grp.title}": "Save response" needs an @action in the step`);
+        if (it.save.some((m) => !m.path.trim() || !m.var)) issues.push(`"${grp.title}": each saved field needs a path and a variable`);
+        const names = it.save.map((m) => m.var).filter(Boolean);
+        if (new Set(names).size !== names.length) issues.push(`"${grp.title}": a variable is saved twice in one step`);
+      }
       if (it.type === 'bubble') {
         if (!text(it.content)) issues.push(`"${grp.title}": a text bubble is empty`);
         if (it.content.some((p) => p.t === 'action')) issues.push(`"${grp.title}": a text bubble can't run @actions; use an AI step`);

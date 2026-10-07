@@ -4,12 +4,14 @@ import { AtSign, Filter, GitBranch, GripVertical, Hash, MessageSquare, Phone, Pl
 import { Handle, NodeProps, Node, Position, useConnection, useUpdateNodeInternals } from '@xyflow/react';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import {
-  addCase, addVariable, appendItem, BLOCKS, GraphCase, GraphGroup, GraphItem, GROUP_WIDTH, INPUT_FORMATS, InputFormat,
-  removeCase, removeGroup, removeItem, renameGroup, Rule, RULE_OPS, RuleOp, setCase, setCaseCondition, setConditionMode, setInput,
-  setStepContent, toVarName, WorkflowGraph,
+  addCase, appendItem, BLOCKS, GraphCase, GraphGroup, GraphItem, GROUP_WIDTH, INPUT_FORMATS, InputFormat,
+  removeCase, removeGroup, removeItem, renameGroup, Rule, RULE_OPS, RuleOp, setCase, setCaseCondition, setInput,
+  setStepContent, WorkflowGraph,
 } from '@/lib/graph';
 import { StepEditor } from '../step-editor';
 import { useCanvas } from './context';
+import { SaveResponse } from './save-response';
+import { VarSelect } from './var-select';
 
 const KIND = { if: 'If', else_if: 'Else if', else: 'Else' } as const;
 export type GroupNodeType = Node<{ group: GraphGroup }, 'card'>;
@@ -94,7 +96,7 @@ function AddBlock({ groupId }: { groupId: string }) {
           {BLOCKS.map((s) => (
             <div key={s.section} className="mb-1 last:mb-0">
               <div className="px-1.5 pb-0.5 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{s.section}</div>
-              <div className="grid grid-cols-2 gap-1">
+              <div className={`grid gap-1 ${s.section === 'Logic' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                 {s.items.map((b) => {
                   const Icon = BLOCK_ICON[b.key];
                   return (
@@ -110,33 +112,6 @@ function AddBlock({ groupId }: { groupId: string }) {
         </div>
       )}
     </div>
-  );
-}
-
-// Pick one of the workflow's variables, or create a new one in place. `set` applies the choice to the graph.
-function VarSelect({ value, set, builtins }: { value: string; set: (g: WorkflowGraph, v: string) => WorkflowGraph; builtins?: boolean }) {
-  const c = useCanvas();
-  const [adding, setAdding] = useState(false);
-  const [name, setName] = useState('');
-  const own = c.graph.variables ?? [];
-  const finish = () => {
-    const n = toVarName(name);
-    if (n) c.update((g) => set(addVariable(g, n), n));
-    setAdding(false); setName('');
-  };
-  if (adding) return (
-    <input autoFocus value={name} placeholder="new_variable" onChange={(e) => setName(e.target.value)} onBlur={finish}
-           onKeyDown={(e) => { if (e.key === 'Enter') finish(); if (e.key === 'Escape') { setAdding(false); setName(''); } }}
-           className="min-w-0 flex-1 rounded border border-brand bg-panel px-1.5 py-0.5 font-mono text-xs outline-none" />
-  );
-  return (
-    <select value={value} disabled={c.readOnly} onChange={(e) => (e.target.value === '+new' ? setAdding(true) : c.update((g) => set(g, e.target.value)))}
-            className={`min-w-0 flex-1 rounded border border-line bg-panel px-1 py-0.5 font-mono text-xs ${value ? 'text-var' : 'text-ink-3'}`}>
-      <option value="">variable…</option>
-      {own.map((v) => <option key={v} value={v}>{v}</option>)}
-      {builtins && <optgroup label="Built-in">{c.variables.filter((v) => !own.includes(v.key)).map((v) => <option key={v.key} value={v.key}>{v.key}</option>)}</optgroup>}
-      <option value="+new">+ New variable…</option>
-    </select>
   );
 }
 
@@ -175,6 +150,7 @@ function Item({ group, item, index }: { group: GraphGroup; item: GraphItem; inde
                       actions={item.type === 'bubble' ? [] : c.actions} variables={c.variables} />
         </div>
       </div>
+      {item.type === 'step' && <SaveResponse item={item} />}
     </div>
   );
 
@@ -210,14 +186,7 @@ function Item({ group, item, index }: { group: GraphGroup; item: GraphItem; inde
     <div data-drop={`item:${group.id}:${item.id}`} className={cls}>
       <In id={item.id} style={{ left: -10, top: 16 }} />
       {grip}{tools}
-      {head('Condition', 'text-brand', !c.readOnly && (
-        <span className="ml-auto flex overflow-hidden rounded border border-line text-[10px] font-medium normal-case tracking-normal">
-          {(['rules', 'ai'] as const).map((m) => (
-            <button key={m} onClick={() => c.update((g) => setConditionMode(g, item.id, m))}
-                    className={`px-1.5 ${(m === 'rules') === rules ? 'bg-brand-soft text-brand' : 'text-ink-3 hover:bg-hover'}`}>{m === 'rules' ? 'Rules' : 'AI'}</button>
-          ))}
-        </span>
-      ))}
+      {head(rules ? 'Condition' : 'AI condition', 'text-brand')}
       <div className="space-y-1">
         {item.cases.map((cs) => (
           <div key={cs.id} className="group/c relative flex items-start gap-1.5 rounded-md border border-line bg-panel px-2 py-1">

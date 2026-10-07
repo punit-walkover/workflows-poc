@@ -4,7 +4,7 @@ import { executeAction, getAction, validateArgs } from '../actions/execute';
 import { chooseCase, compose, decideStep, StepDecision } from '../llm/decider';
 import { ActionRow, Facts, GotoNode, OutboxItem, RunRow, Signal, StepNode } from '../types';
 import { between, renderInline, stepActions } from '../workflows/tree';
-import { checkAnswer, chooseByRules, RETRY } from './blocks';
+import { checkAnswer, chooseByRules, RETRY, saveResponse } from './blocks';
 import { AskNode, Flow, Jump, SayNode } from './flow';
 import { loadRun, saveRun } from './context';
 import { addEvent } from './events';
@@ -49,7 +49,7 @@ export async function decide(runId: string): Promise<Decision> {
     return { kind: 'ask', nodeId, answer: v.ok ? { value: v.value } : null, invalid: !v.ok };
   }
   if (node.type === 'branch' && node.mode === 'rules') {
-    const c = chooseByRules(node, { ...ctx.vars, ...ctx.run.facts.collected });
+    const c = chooseByRules(node, { ...ctx.run.facts.collected, ...ctx.vars, ...ctx.run.facts.vars });
     await addEvent(runId, nodeId, 'system', 'case_chosen', c);
     return { kind: 'case', nodeId, caseId: c.case_id, reason: c.reason };
   }
@@ -134,9 +134,11 @@ export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }
 
 // ③ Apply the decision to run state: facts, cursor, status. Returns what the loop does next.
 export async function advance(runId: string, dec: Decision, out: ActOutcome | null): Promise<Next> {
-  const { run, flow, vars } = await loadRun(runId);
+  const { run, flow, vars, version } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
+  // Words the customer reads: a declared variable with no value yet shows as nothing, not as {{name}}.
+  const shown = { ...Object.fromEntries((version.graph?.variables ?? []).map((k) => [k, ''])), ...vars };
   const finish = async (status: RunRow['status'], reason: string): Promise<Next> => {
     await saveRun(runId, { ...r, status, current_node_id: status === 'completed' ? null : r.current_node_id, waiting_for: null, ended: true, end_reason: reason });
     await addEvent(runId, null, 'system', status === 'completed' ? 'run_completed' : `run_${status}`, { reason });
@@ -181,15 +183,15 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     return { next: 'continue' };
   }
   if (dec.kind === 'say') {
-    const text = renderInline((flow.node(dec.nodeId) as SayNode).content, vars);
+    const text = renderInline((flow.node(dec.nodeId) as SayNode).content, shown);
     if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
     return moveOn(dec.nodeId);
   }
   if (dec.kind === 'ask') {
     const node = flow.node(dec.nodeId) as AskNode;
     if (dec.answer) {
-      r.facts.collected[node.saveAs] = dec.answer.value;
-      (r.facts.collectedBy ??= {})[dec.nodeId] = [node.saveAs];
+      (r.facts.vars ??= {})[node.saveAs] = dec.answer.value;
+      (r.facts.varsBy ??= {})[dec.nodeId] = [node.saveAs];
       r.facts.outputs[dec.nodeId] = { [node.saveAs]: dec.answer.value };
       delete r.facts.asked?.[dec.nodeId]; // answer used: a later visit asks again
       return moveOn(dec.nodeId);
@@ -200,7 +202,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
       return finish('escalated', 'no valid answer after 3 tries');
     }
     // An empty prompt is fine: the text bubble before it usually asks the question.
-    const text = dec.invalid ? node.retry?.trim() || RETRY[node.format] : renderInline(node.prompt, vars);
+    const text = dec.invalid ? node.retry?.trim() || RETRY[node.format] : renderInline(node.prompt, shown);
     if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
     (r.facts.asked ??= {})[dec.nodeId] = new Date().toISOString();
     r.waiting_for = { type: 'customer', node_id: dec.nodeId, expects: [node.saveAs], remind_at: now + config.remindAfterSec * 1000,
@@ -245,6 +247,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   if (out.status === 'done') {
     const first = !(nodeId in r.facts.outputs);
     r.facts.outputs[nodeId] = out.output;
+    if (first) await keepResponse(runId, r, flow.node(nodeId) as StepNode, out.output);
     // Nothing said yet: run the step once more so the AI can tell the customer what the result means.
     if (first && !d.message?.trim()) { await saveRun(runId, { ...r, status: 'running' }); return { next: 'continue' }; }
     say(d.message);
@@ -363,6 +366,7 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
           return { next: 'wait', deadline: now + HOUR };
         }
         r.facts.outputs[nodeId] = res.result;
+        await keepResponse(runId, r, flow.node(nodeId) as StepNode, res.result);
       } else {
         r.facts.outputs[nodeId] = { approved: s.approved, reviewed_by: s.by, reviewer_note: s.note ?? '' };
       }
@@ -400,6 +404,13 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
 
 const LIMIT = Symbol('loop limit');
 
+// Copy the step's mapped response fields into variables, and log what was saved (or missing).
+async function keepResponse(runId: string, r: RunRow, step: StepNode | undefined, output: unknown) {
+  if (!step?.save?.length) return;
+  const { saved, missing } = saveResponse(r.facts, step.id, step.save, output);
+  await addEvent(runId, step.id, 'system', 'response_saved', { saved, missing });
+}
+
 // Repeat bookkeeping for a jump back: count the visit and clear what re-runs (results kept as "previous").
 // Returns the visit number, or false once a limited jump has been taken too often.
 function rerun(r: RunRow, key: string, max: number | undefined, fresh: boolean | undefined, ids: string[]): number | false {
@@ -417,6 +428,7 @@ function rerun(r: RunRow, key: string, max: number | undefined, fresh: boolean |
     r.facts.since[id] = { at, fresh: !!fresh };
     // "Ask again": the customer's earlier answers to these steps no longer count.
     if (fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
+    if (fresh) for (const k of r.facts.varsBy?.[id] ?? []) delete r.facts.vars?.[k];
   }
   return visit;
 }

@@ -230,7 +230,7 @@ function Flow({ graph, onChange, actions, variables, highlight, readOnly }: Prop
             {BLOCKS.map((sec) => (
               <div key={sec.section}>
                 <div className="px-0.5 pb-1 text-[10px] font-semibold uppercase tracking-wide text-ink-3">{sec.section}</div>
-                <div className="grid grid-cols-2 gap-1">
+                <div className={`grid gap-1 ${sec.section === 'Logic' ? 'grid-cols-1' : 'grid-cols-2'}`}>
                   {sec.items.map((b) => {
                     const Icon = BLOCK_ICON[b.key];
                     return (

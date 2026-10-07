@@ -52,7 +52,7 @@ ${allowed}${input.step.id in input.facts.outputs
   ? `\nThis step's action already ran; its result is outputs.${input.step.id}. Do not call it again: answer "complete" with a "message" that tells the customer what the step says, using that result (empty message only if the step says nothing to tell).`
   : input.allowed.length ? `\nThis step is not done until you call ${input.allowed.map((a) => a.key).join(' / ')} with "call_action" (put anything to tell the customer in "message"), unless you must "ask_customer" for a missing arg.` : ''}
 Customer: ${input.vars['customer.name']} <${input.vars['customer.email']}>
-Known facts (action results are authoritative): ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}
+Known facts (action results are authoritative): ${JSON.stringify({ collected: input.facts.collected, ...(input.facts.vars ? { variables: input.facts.vars } : {}), outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}
 Conversation (oldest first):
 ${transcript(input.messages)}${input.retry ? '\n Follow the rules exactly.' : ''}`;
   const r = await chat(STEP_SYSTEM, user, true);

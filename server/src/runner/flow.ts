@@ -50,7 +50,7 @@ export function graphFlow(g: WorkflowGraph): Flow {
       const it = p && groups.get(p.groupId)!.items[p.idx];
       if (!it) return undefined;
       switch (it.type) {
-        case 'step': return { id, type: 'step', content: it.content };
+        case 'step': return { id, type: 'step', content: it.content, save: it.save };
         case 'bubble': return { id, type: 'say', content: it.content };
         case 'input': return { id, type: 'ask', prompt: it.prompt, saveAs: it.saveAs, format: it.format, retry: it.retry };
         // A condition item runs exactly like a branch whose cases lead out through edges.

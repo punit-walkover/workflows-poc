@@ -12,10 +12,12 @@ export const INPUT_FORMATS = [
   { format: 'text', label: 'Text' }, { format: 'email', label: 'Email' }, { format: 'number', label: 'Number' }, { format: 'phone', label: 'Phone' },
 ] as const;
 export type InputFormat = (typeof INPUT_FORMATS)[number]['format'];
+// "Save response" on an AI step: copy a field of its action's response into a variable.
+export interface SaveField { path: string; var: string }
 export interface GraphCase { id: string; kind: CaseKind; condition: Inline[]; rules?: Rule[]; join?: 'and' | 'or' }
 // step = AI instruction · bubble = fixed message · input = ask and save the reply · condition = AI- or rule-judged branch.
 export type GraphItem =
-  | { id: string; type: 'step'; content: Inline[] }
+  | { id: string; type: 'step'; content: Inline[]; save?: SaveField[] }
   | { id: string; type: 'bubble'; content: Inline[] }
   | { id: string; type: 'input'; prompt: Inline[]; saveAs: string; format: InputFormat; retry?: string }
   | { id: string; type: 'condition'; mode?: 'ai' | 'rules'; cases: GraphCase[] };
@@ -141,6 +143,8 @@ export const removeItem = (g: WorkflowGraph, groupId: string, itemId: string): W
 
 export const setStepContent = (g: WorkflowGraph, itemId: string, content: Inline[]) =>
   mapItem(g, itemId, (it) => (it.type === 'step' || it.type === 'bubble' ? { ...it, content } : it));
+export const setStepSave = (g: WorkflowGraph, itemId: string, save: SaveField[]) =>
+  mapItem(g, itemId, (it) => (it.type === 'step' ? { ...it, save: save.length ? save : undefined } : it));
 export const setInput = (g: WorkflowGraph, itemId: string, patch: Partial<Extract<GraphItem, { type: 'input' }>>) =>
   mapItem(g, itemId, (it) => (it.type === 'input' ? { ...it, ...patch } : it));
 export const setCase = (g: WorkflowGraph, itemId: string, caseId: string, patch: Partial<GraphCase>) =>
@@ -230,3 +234,26 @@ export function tidy(g: WorkflowGraph, heightOf?: (groupId: string) => number | 
 // Rough card height when the real one isn't known (same estimate as the server's layout).
 export const cardHeight = (grp: GraphGroup) =>
   76 + grp.items.reduce((h, it) => h + (it.type === 'condition' ? 56 + it.cases.length * 48 : it.type === 'input' ? 88 : 64), 0);
+
+// Blocks a run at `itemId` can still get to (itself included): the rest of its group, then the arrows out of it.
+// Every case of a condition counts, since a later loop could decide it differently.
+export function reachableFrom(g: WorkflowGraph, itemId: string | null): Set<string> {
+  const seen = new Set<string>();
+  if (!itemId) return seen;
+  const where = new Map<string, { grp: GraphGroup; i: number }>();
+  g.groups.forEach((grp) => grp.items.forEach((it, i) => where.set(it.id, { grp, i })));
+  const entry = (to: EdgeTo) => to.itemId ?? g.groups.find((x) => x.id === to.groupId)?.items[0]?.id;
+  const queue = [itemId];
+  while (queue.length) {
+    const id = queue.shift()!;
+    const at = where.get(id);
+    if (!at || seen.has(id)) continue;
+    seen.add(id);
+    const it = at.grp.items[at.i];
+    const after = at.grp.items[at.i + 1];
+    if (it.type === 'condition') g.edges.filter((e) => e.from.itemId === id).forEach((e) => { const t = entry(e.to); if (t) queue.push(t); });
+    if (after) queue.push(after.id);
+    else g.edges.filter((e) => e.from.groupId === at.grp.id && !e.from.itemId).forEach((e) => { const t = entry(e.to); if (t) queue.push(t); });
+  }
+  return seen;
+}

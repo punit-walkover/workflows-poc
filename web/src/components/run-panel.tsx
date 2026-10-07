@@ -4,13 +4,13 @@ import { useState } from 'react';
 import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, Loader2, Minus } from 'lucide-react';
 import { api, API, money } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
-import type { WorkflowGraph } from '@/lib/graph';
+import { reachableFrom, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
 
 export interface RunView {
   id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
-  facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; visits?: Record<string, number> };
+  facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; vars?: Record<string, any>; visits?: Record<string, number> };
   waiting_for: any; end_reason: string | null;
 }
 export interface EventRow { id: string; node_id: string | null; actor: string; type: string; data: any; at: string }
@@ -159,25 +159,40 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
 function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView; visited: Set<unknown> }) {
   const groups = [...graph.groups].sort((a, b) => (a.id === graph.start ? -1 : b.id === graph.start ? 1 : a.x - b.x || a.y - b.y));
   const live = ACTIVE.includes(run.status);
+  // Skipped: never ran and the run can't get there any more (after it ends, that's everything that never ran).
+  const ahead = reachableFrom(graph, live ? run.current_node_id : null);
+  const skipped = (id: string) => !visited.has(id) && !ahead.has(id);
   return (
     <div className="space-y-2">
-      {groups.map((g) => (
-        <div key={g.id} className="rounded-lg border border-line px-2 py-1.5">
-          <div className="mb-1 text-xs font-semibold text-ink-2">{g.title}</div>
+      {groups.map((g) => {
+        const off = g.items.length > 0 && g.items.every((it) => skipped(it.id));
+        return (
+        <div key={g.id} className={`rounded-lg border border-line px-2 py-1.5 ${off ? 'border-dashed bg-canvas/40 opacity-60' : ''}`}>
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink-2">
+            <span className={off ? 'line-through' : ''}>{g.title}</span>
+            {off && <span className="rounded bg-hover px-1 text-[10px] font-medium uppercase tracking-wide text-ink-3">Skipped</span>}
+          </div>
           {g.items.map((it) => {
             const current = live && run.current_node_id === it.id;
             const done = visited.has(it.id) && !current;
+            const skip = skipped(it.id);
             const icon = current ? (run.status === 'running' ? <Loader2 size={13} className="animate-spin text-action" /> : <Clock size={13} className="text-warn" />)
-              : done ? <Check size={13} className="text-ok" /> : <Circle size={13} className="text-line" />;
+              : done ? <Check size={13} className="text-ok" /> : skip ? <Minus size={13} className="text-ink-3" /> : <Circle size={13} className="text-line" />;
             const chosen = it.type === 'condition' ? it.cases.find((c) => c.id === run.facts.cases?.[it.id]?.case_id) : undefined;
             return (
               <div key={it.id} className={`my-0.5 flex gap-2 rounded-md border px-1.5 py-1 ${current ? 'border-warn bg-warn-soft/60 font-medium shadow-sm' : 'border-transparent'}`}>
                 <span className="mt-0.5 shrink-0">{icon}</span>
-                <span className="leading-snug">
-                  {it.type === 'step' ? <InlineText content={it.content} />
+                <span className={`leading-snug ${skip ? 'text-ink-3 line-through decoration-ink-3/60' : ''}`}>
+                  {it.type === 'step' ? <><InlineText content={it.content} />
+                      {done && it.save?.map((m) => {
+                        const v = run.facts.vars?.[m.var];
+                        return <span key={m.var} className="block text-xs">
+                          <span className="font-mono text-var">{m.var}</span>{v === undefined ? <span className="text-warn"> ({m.path}: not in response)</span> : <span className="text-ok"> = {typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>}
+                        </span>;
+                      })}</>
                     : it.type === 'bubble' ? <span className="text-ink-2">Says: “<InlineText content={it.content} />”</span>
                     : it.type === 'input' ? <>Asks for <span className="font-mono text-var">{it.saveAs || '…'}</span>
-                        {run.facts.collected?.[it.saveAs] !== undefined && done && <span className="text-ok"> = {String(run.facts.collected[it.saveAs])}</span>}</>
+                        {(run.facts.vars?.[it.saveAs] ?? run.facts.collected?.[it.saveAs]) !== undefined && done && <span className="text-ok"> = {String(run.facts.vars?.[it.saveAs] ?? run.facts.collected[it.saveAs])}</span>}</>
                     : <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise'
                         : it.mode === 'rules' ? (chosen.rules ?? []).map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(chosen.join === 'or' ? ' or ' : ' and ')
                         : <InlineText content={chosen.condition} />}</span>}</>}
@@ -186,7 +201,8 @@ function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView;
             );
           })}
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -201,7 +217,7 @@ function findNode(list: WorkflowNode[], id: string): WorkflowNode | null {
 
 const LABEL: Record<string, string> = {
   run_started: 'Run started', llm_decision: 'Model decided', case_chosen: 'Branch chosen', action_called: 'Action called',
-  action_result: 'Action result', input_received: 'Answer saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
+  action_result: 'Action result', input_received: 'Answer saved', response_saved: 'Response saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
   message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
   run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
   error: 'Error', invalid_action: 'Invalid action',

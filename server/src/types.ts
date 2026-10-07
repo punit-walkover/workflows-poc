@@ -1,7 +1,9 @@
 // Workflow tree as stored in workflow.steps / workflow_version.steps.
 export type Inline = { t: 'text'; v: string } | { t: 'action'; key: string } | { t: 'var'; key: string };
 
-export interface StepNode { id: string; type: 'step'; content: Inline[] }
+// save: copy fields of the step's action response into workflow variables (path like "items[0].name").
+export interface SaveField { path: string; var: string }
+export interface StepNode { id: string; type: 'step'; content: Inline[]; save?: SaveField[] }
 export interface BranchCase { id: string; kind: 'if' | 'else_if' | 'else'; condition: Inline[]; steps: WorkflowNode[]; rules?: Rule[]; join?: 'and' | 'or' }
 // mode 'rules': cases are checked in code against variables (no AI); otherwise the AI judges each case.
 export interface BranchNode { id: string; type: 'branch'; cases: BranchCase[]; mode?: 'ai' | 'rules' }
@@ -20,7 +22,7 @@ export type InputFormat = (typeof INPUT_FORMATS)[number];
 // step = AI instruction · bubble = fixed message · input = ask and save the reply in a variable · condition = branch.
 export interface GraphCase { id: string; kind: 'if' | 'else_if' | 'else'; condition: Inline[]; rules?: Rule[]; join?: 'and' | 'or' }
 export type GraphItem =
-  | { id: string; type: 'step'; content: Inline[] }
+  | { id: string; type: 'step'; content: Inline[]; save?: SaveField[] }
   | { id: string; type: 'bubble'; content: Inline[] }
   | { id: string; type: 'input'; prompt: Inline[]; saveAs: string; format: InputFormat; retry?: string }
   | { id: string; type: 'condition'; mode?: 'ai' | 'rules'; cases: GraphCase[] };
@@ -72,6 +74,8 @@ export interface Facts {
   since?: Record<string, string | { at: string; fresh: boolean }>; // node id -> when a Go to step jumped back over it
   previous?: Record<string, unknown>; // node id -> its result before the last jump back
   collectedBy?: Record<string, string[]>; // node id -> collected keys it filled
+  vars?: Record<string, unknown>;     // the workflow's own variables (inputs and saved responses); the AI can't overwrite them
+  varsBy?: Record<string, string[]>;  // block id -> variables it filled ("ask again" clears them on a loop back)
   asked?: Record<string, string>; // input block id -> when it last asked (its answer is the next customer message)
   trail?: string[]; // canvas runs: item ids in the order they finished (finds what a loop back re-runs)
 }
