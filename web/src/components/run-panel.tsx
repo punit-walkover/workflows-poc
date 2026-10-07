@@ -7,6 +7,7 @@ import { inlineText, type WorkflowNode } from '@/lib/tree';
 import { reachableFrom, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
+import { ActionRun, ToolCalls } from './tool-call';
 
 export interface RunView {
   id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
@@ -18,7 +19,7 @@ export interface Task { id: string; run_id: string; status: string; kind: string
 
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
-export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView; events: EventRow[]; approvals: Task[]; onChanged: () => void }) {
+export function RunPanel({ run, events, approvals, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; approvals: Task[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
   const [dbos, setDbos] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
@@ -34,6 +35,10 @@ export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView;
     try { await api(`/runs/${run.id}/${op}`, { method: 'POST', body: { by: 'You (teammate)' } }); onChanged(); } catch (e: any) { setError(e.message); }
   };
   const visited = new Set(events.map((e) => e.node_id).filter(Boolean));
+  // Tool calls per step, oldest first (a loop's repeat is a later visit).
+  const calls = new Map<string, ActionRun[]>();
+  for (const c of [...actionRuns].sort((a, b) => a.visit - b.visit || a.started_at.localeCompare(b.started_at)))
+    if (c.node_id) calls.set(c.node_id, [...(calls.get(c.node_id) ?? []), c]);
   const active = ACTIVE.includes(run.status);
   const pending = approvals.filter((t) => t.status === 'pending' && t.run_id === run.id);
 
@@ -61,7 +66,7 @@ export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView;
 
       <section>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Steps</div>
-        {run.graph ? <GraphRun graph={run.graph} run={run} visited={visited} /> : <RunTree list={run.steps} run={run} visited={visited} skipped={false} />}
+        {run.graph ? <GraphRun graph={run.graph} run={run} visited={visited} calls={calls} /> : <RunTree list={run.steps} run={run} visited={visited} calls={calls} skipped={false} />}
       </section>
 
       <section>
@@ -98,7 +103,9 @@ function WaitingLine({ run }: { run: RunView }) {
   return <div className="mt-1 flex items-center gap-1 text-xs text-bad"><Clock size={12} /> Waiting for approval · due {at(w.due_at)}</div>;
 }
 
-function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNode[]; run: RunView; visited: Set<unknown>; skipped: boolean; depth?: number }) {
+type Calls = Map<string, ActionRun[]>;
+
+function RunTree({ list, run, visited, calls, skipped, depth = 0 }: { list: WorkflowNode[]; run: RunView; visited: Set<unknown>; calls: Calls; skipped: boolean; depth?: number }) {
   return (
     <div className={depth ? 'ml-4 border-l border-line pl-3' : ''}>
       {list.map((n, i) => {
@@ -126,7 +133,8 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
             <div key={n.id} className={`my-0.5 flex gap-2 py-1 ${box} ${skipped ? 'opacity-40' : ''} ${current ? 'font-medium' : ''}`}>
               <span className="mt-1 shrink-0">{icon}</span>
               <span className="w-4 shrink-0 text-ink-3">{i + 1}.</span>
-              <span className="leading-snug"><InlineText content={n.content} /></span>
+              <span className="min-w-0 leading-snug"><InlineText content={n.content} />
+                {done && <ToolCalls calls={calls.get(n.id) ?? []} output={run.facts.outputs?.[n.id]} />}</span>
             </div>
           );
         }
@@ -144,7 +152,7 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
                     <span className="text-ink-2">{c.kind === 'else' ? 'otherwise' : <InlineText content={c.condition} />}</span>
                   </div>
                   {isChosen && <div className="ml-6 text-xs italic text-ok">{chosen.reason}</div>}
-                  <RunTree list={c.steps} run={run} visited={visited} skipped={off} depth={depth + 1} />
+                  <RunTree list={c.steps} run={run} visited={visited} calls={calls} skipped={off} depth={depth + 1} />
                 </div>
               );
             })}
@@ -156,7 +164,7 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
 }
 
 // Canvas runs: groups in reading order (start first), the step the run is on in a yellow box.
-function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView; visited: Set<unknown> }) {
+function GraphRun({ graph, run, visited, calls }: { graph: WorkflowGraph; run: RunView; visited: Set<unknown>; calls: Calls }) {
   const groups = [...graph.groups].sort((a, b) => (a.id === graph.start ? -1 : b.id === graph.start ? 1 : a.x - b.x || a.y - b.y));
   const live = ACTIVE.includes(run.status);
   // Skipped: never ran and the run can't get there any more (after it ends, that's everything that never ran).
@@ -182,14 +190,15 @@ function GraphRun({ graph, run, visited }: { graph: WorkflowGraph; run: RunView;
             return (
               <div key={it.id} className={`my-0.5 flex gap-2 rounded-md border px-1.5 py-1 ${current ? 'border-warn bg-warn-soft/60 font-medium shadow-sm' : 'border-transparent'}`}>
                 <span className="mt-0.5 shrink-0">{icon}</span>
-                <span className={`leading-snug ${skip ? 'text-ink-3 line-through decoration-ink-3/60' : ''}`}>
+                <span className={`min-w-0 leading-snug ${skip ? 'text-ink-3 line-through decoration-ink-3/60' : ''}`}>
                   {it.type === 'step' ? <><InlineText content={it.content} />
                       {done && it.save?.map((m) => {
                         const v = run.facts.vars?.[m.var];
                         return <span key={m.var} className="block text-xs">
                           <span className="font-mono text-var">{m.var}</span>{v === undefined ? <span className="text-warn"> ({m.path}: not in response)</span> : <span className="text-ok"> = {typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>}
                         </span>;
-                      })}</>
+                      })}
+                      {(done || current) && <ToolCalls calls={calls.get(it.id) ?? []} output={run.facts.outputs?.[it.id]} />}</>
                     : it.type === 'bubble' ? <span className="text-ink-2">Says: “<InlineText content={it.content} />”</span>
                     : it.type === 'input' ? <>Asks for <span className="font-mono text-var">{it.saveAs || '…'}</span>
                         {(run.facts.vars?.[it.saveAs] ?? run.facts.collected?.[it.saveAs]) !== undefined && done && <span className="text-ok"> = {String(run.facts.vars?.[it.saveAs] ?? run.facts.collected[it.saveAs])}</span>}</>

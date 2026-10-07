@@ -39,9 +39,10 @@ export async function executeAction(action: ActionRow, args: Record<string, any>
   const prior = await one('select id, status, result from action_run where idempotency_key = $1', [key]);
   if (prior.status === 'succeeded') return { ok: true, result: prior.result, actionRunId: prior.id };
   // A retry after failure may carry corrected args.
-  if (prior.status === 'failed') await q(`update action_run set args = $2, status = 'running' where id = $1`, [prior.id, JSON.stringify(args)]);
+  if (prior.status === 'failed') await q(`update action_run set args = $2, status = 'running', started_at = now() where id = $1`, [prior.id, JSON.stringify(args)]);
 
   try {
+    // finished_at uses clock_timestamp(): inside a transaction now() is the transaction's start, before the call ran.
     const result = await tx(async (c) => {
       const locked = (await c.query('select status, result from action_run where id = $1 for update', [prior.id])).rows[0];
       if (locked.status === 'succeeded') return locked.result;
@@ -49,12 +50,12 @@ export async function executeAction(action: ActionRow, args: Record<string, any>
         : action.source === 'viasocket_flow' ? await runFlow(action.via_flow_url!, args)
         : await HANDLERS[action.key]?.(c, args);
       if (!out) throw new Error(`no handler for ${action.key}`);
-      await c.query(`update action_run set status = 'succeeded', result = $2, error = null, finished_at = now() where id = $1`, [prior.id, JSON.stringify(out)]);
+      await c.query(`update action_run set status = 'succeeded', result = $2, error = null, finished_at = clock_timestamp() where id = $1`, [prior.id, JSON.stringify(out)]);
       return out;
     });
     return { ok: true, result, actionRunId: prior.id };
   } catch (e: any) {
-    await q(`update action_run set status = 'failed', error = $2, finished_at = now() where id = $1`, [prior.id, e.message]);
+    await q(`update action_run set status = 'failed', error = $2, finished_at = clock_timestamp() where id = $1`, [prior.id, e.message]);
     return { ok: false, error: e.message, actionRunId: prior.id };
   }
 }
