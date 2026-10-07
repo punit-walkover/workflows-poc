@@ -2,18 +2,19 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImagePlus, Plus, Send, X } from 'lucide-react';
-import { api, API, money } from '@/lib/api';
+import { api, API } from '@/lib/api';
 import { AttentionDot, Button, StatusChip } from '@/components/ui';
 import { ApprovalCard, EventRow, RunPanel, RunView, Task } from '@/components/run-panel';
+import type { ActionRun } from '@/components/tool-call';
 
 interface Conv { id: string; customer_name: string; customer_email: string; channel: string; run_status: string | null; last_text: string | null; pending_approvals: number }
 interface Msg { id: string; role: 'customer' | 'bot' | 'team' | 'system'; text: string; attachments: { id: string; file_name: string; mime_type: string }[]; created_at: string }
-interface State { conversation: Conv; messages: Msg[]; runs: RunView[]; events: EventRow[]; approvals: Task[] }
+interface State { conversation: Conv; messages: Msg[]; runs: RunView[]; events: EventRow[]; approvals: Task[]; action_runs: ActionRun[] }
 
 const PERSONAS = [
-  { name: 'Alex Kim', email: 'alex@example.com', hint: 'Orders 4512 (headphones, 6 days ago) and 4513 (keyboard, 45 days ago)' },
-  { name: 'Sam Rivera', email: 'sam@example.com', hint: 'Order 4600 (blender $159.99). Refunds need a teammate’s approval' },
-  { name: 'Jo Patel', email: 'jo@example.com', hint: 'Order 4700 (mugs + kettle, 10 days ago)' },
+  { name: 'Alex Kim', email: 'alex@example.com' },
+  { name: 'Sam Rivera', email: 'sam@example.com' },
+  { name: 'Jo Patel', email: 'jo@example.com' },
 ];
 
 // Who wrote it, shown on every bubble.
@@ -57,7 +58,6 @@ export default function PlaygroundPage() {
           <select value={persona} onChange={(e) => setPersona(Number(e.target.value))} className="mb-2 w-full rounded-md border border-line px-2 py-1.5">
             {PERSONAS.map((p, i) => <option key={p.email} value={i}>{p.name} · {p.email}</option>)}
           </select>
-          <div className="mb-2 text-xs text-ink-3">{PERSONAS[persona].hint}</div>
           <Button variant="primary" className="w-full" onClick={start}><Plus size={15} /> New conversation</Button>
         </div>
         {waiting > 0 && (
@@ -89,7 +89,7 @@ export default function PlaygroundPage() {
         <>
           <Chat state={state} onChanged={refresh} />
           <aside className="w-[400px] shrink-0 overflow-auto border-l border-line bg-panel">
-            <RunPanel run={state.runs[0]} events={state.events} approvals={state.approvals} onChanged={refresh} />
+            <RunPanel run={state.runs[0]} events={state.events} actionRuns={state.action_runs} onChanged={refresh} />
           </aside>
         </>
       ) : (
@@ -119,7 +119,8 @@ function Chat({ state, onChanged }: { state: State; onChanged: () => void }) {
 
   const last = state.messages.filter((m) => m.role !== 'system').at(-1);
   const run = state.runs[0];
-  const thinking = last?.role === 'customer' && (!run || !['waiting_customer', 'waiting_approval', 'paused', 'escalated'].includes(run.status));
+  // Only while a run is actually working (or routing hasn't started one yet); a finished run never "works".
+  const thinking = last?.role === 'customer' && (!run || run.status === 'running');
   const pending = state.approvals.filter((t) => t.status === 'pending').length;
 
   const send = async () => {
@@ -225,38 +226,18 @@ function Label({ who, at, extra }: { who: keyof typeof WHO; at?: string; extra?:
 }
 
 function EmptyState() {
-  const [orders, setOrders] = useState<any[]>([]);
-  useEffect(() => { api('/orders').then(setOrders); }, []);
   return (
     <div className="flex-1 overflow-auto p-10">
       <div className="mx-auto max-w-2xl">
         <h1 className="mb-1 text-xl font-semibold">Playground</h1>
         <p className="mb-6 text-ink-2">Pick a customer on the left and start a conversation. The agent routes it to a published workflow and runs it step by step, durably, with DBOS. Chats waiting on an approval show a red dot.</p>
-        <div className="mb-6 rounded-xl border border-line bg-panel p-4">
-          <div className="mb-2 font-medium">Try these</div>
+        <div className="rounded-xl border border-line bg-panel p-4">
+          <div className="mb-2 font-medium">Try it</div>
           <ul className="list-disc space-y-1 pl-5 text-ink-2">
-            <li>As Alex: “My headphones arrived cracked, I want a refund.” Then send order <b>4512</b> and attach any photo. Approve it right in the chat.</li>
-            <li>As Alex: “I want my money back for order 4513.” (outside the 30-day window, so it escalates)</li>
-            <li>As Sam: “Refund my blender please, order 4600.” (refunds need approval: the chat gets a red dot, open it and approve)</li>
+            <li>Publish and enable a workflow, then write a message that matches its <i>When to use</i>.</li>
+            <li>Switch <b>Write as</b> to Team to reply as a teammate; approvals appear right in the chat.</li>
+            <li>The right panel shows each step, its tool calls and the run&apos;s timeline.</li>
           </ul>
-        </div>
-        <div className="rounded-xl border border-line bg-panel">
-          <div className="flex items-center justify-between border-b border-line px-4 py-2">
-            <span className="font-medium">Mock shop orders</span>
-            <Button variant="ghost" onClick={async () => { await api('/demo/reset-orders', { method: 'POST' }); setOrders(await api('/orders')); }}>Reset refunds</Button>
-          </div>
-          <table className="w-full text-left text-sm">
-            <thead className="text-xs text-ink-3"><tr><th className="px-4 py-2">Order</th><th>Customer</th><th>Items</th><th>Delivered</th><th>Total</th><th>Refunded</th></tr></thead>
-            <tbody>
-              {orders.map((o) => (
-                <tr key={o.id} className="border-t border-line">
-                  <td className="px-4 py-2 font-medium">{o.id}</td><td>{o.customer_email}</td>
-                  <td>{o.items.map((i: any) => i.name).join(', ')}</td><td>{o.days_since_delivery} days ago</td>
-                  <td>{money(o.total_minor)}</td><td>{money(o.refunded_minor)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

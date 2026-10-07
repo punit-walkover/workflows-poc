@@ -1,18 +1,24 @@
 import { one, q } from '../db';
 import { Transcript } from '../llm/decider';
-import { RunRow, WorkflowNode } from '../types';
-import { indexTree } from '../workflows/tree';
+import { RunRow, WorkflowGraph, WorkflowNode } from '../types';
+import { flowOf } from './flow';
 
 // Everything a step needs about a run, read fresh (steps must not rely on workflow-function memory).
 export async function loadRun(runId: string) {
   const run = await one<RunRow>('select * from workflow_run where id = $1', [runId]);
   if (!run) throw new Error(`run ${runId} not found`);
-  const version = await one<{ name: string; version: number; steps: WorkflowNode[]; workflow_id: string }>(
-    'select name, version, steps, workflow_id from workflow_version where id = $1', [run.workflow_version_id]);
+  const version = await one<{ name: string; version: number; steps: WorkflowNode[]; graph: WorkflowGraph | null; workflow_id: string }>(
+    'select name, version, steps, graph, workflow_id from workflow_version where id = $1', [run.workflow_version_id]);
   const conv = await one<{ customer_name: string; customer_email: string }>('select * from conversation where id = $1', [run.conversation_id]);
   const messages = await loadTranscript(run.conversation_id);
-  const vars = { 'customer.name': conv!.customer_name, 'customer.email': conv!.customer_email, today: new Date().toISOString().slice(0, 10) };
-  return { run, version: version!, index: indexTree(version!.steps), messages, vars };
+  const vars: Record<string, string> = { 'customer.name': conv!.customer_name, 'customer.email': conv!.customer_email, today: new Date().toISOString().slice(0, 10) };
+  // The workflow's own variables (filled by input blocks) read like the built-in ones once they have a value.
+  // (older runs kept input answers in facts.collected)
+  for (const k of version!.graph?.variables ?? []) {
+    const v = run.facts.vars?.[k] ?? run.facts.collected[k];
+    if (v !== undefined) vars[k] = typeof v === 'object' ? JSON.stringify(v) : String(v);
+  }
+  return { run, version: version!, flow: flowOf(version!), messages, vars };
 }
 
 export async function loadTranscript(conversationId: string): Promise<Transcript[]> {

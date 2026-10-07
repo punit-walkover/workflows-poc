@@ -31,6 +31,14 @@ async function freeKey(name: string) {
 export class ActionsController {
   @Get() list() { return q('select * from action order by source, created_at, key'); }
 
+  // The newest successful response of an action, so the editor can offer its fields for "Save response".
+  @Get(':key/sample')
+  async sample(@Param('key') key: string) {
+    const r = await one(`select result, finished_at from action_run where action_key = $1 and status = 'succeeded' and result is not null
+                         order by finished_at desc nulls last limit 1`, [key]);
+    return { result: r?.result ?? null, at: r?.finished_at ?? null };
+  }
+
   @Get(':key')
   async get(@Param('key') key: string) {
     const a = await one('select * from action where key = $1', [key]);

@@ -39,51 +39,26 @@ export async function executeAction(action: ActionRow, args: Record<string, any>
   const prior = await one('select id, status, result from action_run where idempotency_key = $1', [key]);
   if (prior.status === 'succeeded') return { ok: true, result: prior.result, actionRunId: prior.id };
   // A retry after failure may carry corrected args.
-  if (prior.status === 'failed') await q(`update action_run set args = $2, status = 'running' where id = $1`, [prior.id, JSON.stringify(args)]);
+  if (prior.status === 'failed') await q(`update action_run set args = $2, status = 'running', started_at = now() where id = $1`, [prior.id, JSON.stringify(args)]);
 
   try {
+    // finished_at uses clock_timestamp(): inside a transaction now() is the transaction's start, before the call ran.
     const result = await tx(async (c) => {
       const locked = (await c.query('select status, result from action_run where id = $1 for update', [prior.id])).rows[0];
       if (locked.status === 'succeeded') return locked.result;
       const out = action.source === 'viasocket' ? await runViaSocket(action, args)
         : action.source === 'viasocket_flow' ? await runFlow(action.via_flow_url!, args)
-        : await HANDLERS[action.key]?.(c, args);
-      if (!out) throw new Error(`no handler for ${action.key}`);
-      await c.query(`update action_run set status = 'succeeded', result = $2, error = null, finished_at = now() where id = $1`, [prior.id, JSON.stringify(out)]);
+        : undefined;
+      if (out === undefined) throw new Error(`${action.key} has no runner (source ${action.source})`);
+      await c.query(`update action_run set status = 'succeeded', result = $2, error = null, finished_at = clock_timestamp() where id = $1`, [prior.id, JSON.stringify(out)]);
       return out;
     });
     return { ok: true, result, actionRunId: prior.id };
   } catch (e: any) {
-    await q(`update action_run set status = 'failed', error = $2, finished_at = now() where id = $1`, [prior.id, e.message]);
+    await q(`update action_run set status = 'failed', error = $2, finished_at = clock_timestamp() where id = $1`, [prior.id, e.message]);
     return { ok: false, error: e.message, actionRunId: prior.id };
   }
 }
-
-// Mock shop handlers (viaSocket flows in the real product). They run inside the action_run lock.
-const HANDLERS: Record<string, (c: any, args: any) => Promise<any>> = {
-  async lookup_order(c, args) {
-    const o = (await c.query(`select *, to_char(delivered_at, 'YYYY-MM-DD') as delivered_on,
-                                (current_date - delivered_at) as days_since_delivery from shop_order where id = $1`,
-      [String(args.order_id).replace(/^#/, '')])).rows[0];
-    if (!o) return { found: false, reason: 'No order with that ID' };
-    if (args.email && o.customer_email.toLowerCase() !== String(args.email).toLowerCase())
-      return { found: false, reason: 'Order ID and email do not match' };
-    return {
-      found: true, order_id: o.id, customer_name: o.customer_name, delivered_at: o.delivered_on,
-      days_since_delivery: Number(o.days_since_delivery), currency: o.currency, items: o.items,
-      total_minor: Number(o.total_minor), refunded_minor: Number(o.refunded_minor),
-      refundable_minor: Number(o.total_minor) - Number(o.refunded_minor),
-    };
-  },
-  async refund_order(c, args) {
-    const r = await c.query(`update shop_order set refunded_minor = refunded_minor + $2
-                             where id = $1 and refunded_minor + $2 <= total_minor returning total_minor, refunded_minor, currency`,
-      [String(args.order_id), args.amount_minor]);
-    if (!r.rowCount) throw new Error('Refund exceeds the refundable amount');
-    return { refund_id: `re_${Math.random().toString(36).slice(2, 8)}`, order_id: String(args.order_id),
-             amount_minor: args.amount_minor, currency: r.rows[0].currency };
-  },
-};
 
 // A viaSocket-backed action: fill its input template with the args and run the app action.
 export async function runViaSocket(action: ActionRow, args: Record<string, unknown>) {

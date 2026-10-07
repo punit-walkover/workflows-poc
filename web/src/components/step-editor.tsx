@@ -8,6 +8,7 @@ import Mention from '@tiptap/extension-mention';
 import { Placeholder } from '@tiptap/extensions';
 import { PluginKey } from '@tiptap/pm/state';
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Inline } from '@/lib/tree';
 
 interface MenuItem { id: string; label: string; hint?: string; kind: 'action' | 'var' | 'condition' }
@@ -129,9 +130,9 @@ export function StepEditor(props: Props) {
   return (
     <div className="step-editor relative w-full">
       <EditorContent editor={editor} />
-      {menu && menu.rect && (
-        <div className="fixed z-50 w-72 overflow-hidden rounded-lg border border-line bg-panel py-1 shadow-lg"
-             style={{ top: menu.rect.bottom + 6, left: menu.rect.left }}>
+      {/* Portalled to <body>: inside the canvas a CSS transform would make "fixed" relative to the zoomed canvas, not the screen. */}
+      {menu && menu.rect && createPortal(
+        <div className="fixed z-[1000] w-72 overflow-hidden rounded-lg border border-line bg-panel py-1 shadow-lg" style={menuPos(menu.rect, menu.items.length)}>
           {menu.items.length === 0 && <div className="px-3 py-2 text-sm text-ink-3">No matches</div>}
           {menu.items.map((it, i) => (
             <button key={it.id} type="button" onMouseDown={(e) => { e.preventDefault(); menu.command(it); }}
@@ -142,8 +143,18 @@ export function StepEditor(props: Props) {
               <span className="truncate text-xs text-ink-3">{it.hint}</span>
             </button>
           ))}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
+}
+
+// Below the cursor, or above it when there's no room; never past the screen's right edge.
+function menuPos(r: DOMRect, count: number): React.CSSProperties {
+  const height = Math.max(1, count) * 32 + 8;
+  const left = Math.max(8, Math.min(r.left, window.innerWidth - 288 - 8));
+  return r.bottom + 6 + height > window.innerHeight && r.top - 6 - height > 0
+    ? { left, bottom: window.innerHeight - r.top + 6 }
+    : { left, top: r.bottom + 6 };
 }

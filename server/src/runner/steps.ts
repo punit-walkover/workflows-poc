@@ -2,8 +2,10 @@ import { config } from '../config';
 import { one, q } from '../db';
 import { executeAction, getAction, validateArgs } from '../actions/execute';
 import { chooseCase, compose, decideStep, StepDecision } from '../llm/decider';
-import { ActionRow, BranchNode, Facts, GotoNode, RunRow, Signal, StepNode } from '../types';
-import { between, nextAfter, stepActions } from '../workflows/tree';
+import { ActionRow, Facts, GotoNode, OutboxItem, RunRow, Signal, StepNode } from '../types';
+import { between, renderInline, stepActions } from '../workflows/tree';
+import { checkAnswer, chooseByRules, RETRY, saveResponse } from './blocks';
+import { AskNode, Flow, Jump, SayNode } from './flow';
 import { loadRun, saveRun } from './context';
 import { addEvent } from './events';
 
@@ -14,6 +16,8 @@ export type Decision =
   | { kind: 'error'; nodeId: string; error: string }
   | { kind: 'case'; nodeId: string; caseId: string | null; reason: string }
   | { kind: 'goto'; nodeId: string }
+  | { kind: 'say'; nodeId: string }
+  | { kind: 'ask'; nodeId: string; answer: { value: string | number } | null; invalid: boolean }
   | { kind: 'step'; nodeId: string; d: StepDecision };
 
 export type ActOutcome =
@@ -32,8 +36,23 @@ export async function decide(runId: string): Promise<Decision> {
   const ctx = await loadRun(runId);
   const nodeId = ctx.run.current_node_id;
   if (!nodeId) return { kind: 'end' };
-  const node = ctx.index.get(nodeId)!.node;
+  const node = ctx.flow.node(nodeId)!;
   if (node.type === 'goto') return { kind: 'goto', nodeId }; // no AI: a jump is deterministic
+  if (node.type === 'say') return { kind: 'say', nodeId };   // text bubble: sent as written
+  if (node.type === 'ask') {
+    // Input block: once it has asked, the customer's next message is the answer.
+    const asked = ctx.run.facts.asked?.[nodeId];
+    const reply = asked && [...ctx.messages].reverse().find((m) => m.role === 'customer' && !!m.created_at && new Date(m.created_at).toISOString() > asked);
+    if (!reply) return { kind: 'ask', nodeId, answer: null, invalid: false };
+    const v = checkAnswer(node.format, reply.text ?? '');
+    await addEvent(runId, nodeId, 'system', v.ok ? 'input_received' : 'input_invalid', { [node.saveAs]: v.ok ? v.value : reply.text, format: node.format });
+    return { kind: 'ask', nodeId, answer: v.ok ? { value: v.value } : null, invalid: !v.ok };
+  }
+  if (node.type === 'branch' && node.mode === 'rules') {
+    const c = chooseByRules(node, { ...ctx.run.facts.collected, ...ctx.vars, ...ctx.run.facts.vars });
+    await addEvent(runId, nodeId, 'system', 'case_chosen', c);
+    return { kind: 'case', nodeId, caseId: c.case_id, reason: c.reason };
+  }
   // A step repeated by Go to step gets a marker in the transcript: keep known answers and ask only for what is
   // missing (default), or start over ("Ask again"). Older runs stored a plain timestamp, which meant start over.
   const raw = ctx.run.facts.since?.[nodeId];
@@ -73,13 +92,16 @@ const visitOf = (f: Facts) => 1 + Object.values(f.visits ?? {}).reduce((a, b) =>
 export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }>): Promise<ActOutcome> {
   try {
     const ctx = await loadRun(runId);
-    const node = ctx.index.get(dec.nodeId)!.node as StepNode;
+    const node = ctx.flow.node(dec.nodeId) as StepNode;
     const key = dec.d.action?.key ?? '';
     if (!stepActions(node.content).includes(key)) return { status: 'invalid', error: `${key || 'action'} is not allowed in this step` };
     const action = await getAction(key);
     if (!action?.enabled) return { status: 'invalid', error: `${key} is disabled` };
     const v = validateArgs(action, dec.d.action?.args);
     if (!v.ok) return { status: 'invalid', error: v.error };
+    // The step already ran its action (it came back to report the result): don't run it twice.
+    const done = ctx.run.facts.outputs[dec.nodeId] as Record<string, unknown> | undefined;
+    if (done && !('approval_task_id' in done)) return { status: 'done', output: done };
     await addEvent(runId, dec.nodeId, 'ai', 'action_called', { key, args: v.args });
 
     if (key === 'escalate_to_human') return { status: 'escalated', reason: String(v.args.reason ?? '') };
@@ -112,22 +134,25 @@ export async function act(runId: string, dec: Extract<Decision, { kind: 'step' }
 
 // ③ Apply the decision to run state: facts, cursor, status. Returns what the loop does next.
 export async function advance(runId: string, dec: Decision, out: ActOutcome | null): Promise<Next> {
-  const { run, index } = await loadRun(runId);
+  const { run, flow, vars, version } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
+  // Words the customer reads: a declared variable with no value yet shows as nothing, not as {{name}}.
+  const shown = { ...Object.fromEntries((version.graph?.variables ?? []).map((k) => [k, ''])), ...vars };
   const finish = async (status: RunRow['status'], reason: string): Promise<Next> => {
     await saveRun(runId, { ...r, status, current_node_id: status === 'completed' ? null : r.current_node_id, waiting_for: null, ended: true, end_reason: reason });
     await addEvent(runId, null, 'system', status === 'completed' ? 'run_completed' : `run_${status}`, { reason });
     return { next: 'end' };
   };
-  const moveOn = async (from: string): Promise<Next> => {
-    r.current_node_id = nextAfter(index, from);
-    r.facts.attempts[from] = 0;
-    r.facts.attempts['!' + from] = 0;
-    if (!r.current_node_id) return finish('completed', 'completed');
+  const go = async (from: string, jump: Jump): Promise<Next> => {
+    const to = await follow(runId, r, flow, from, jump);
+    if (to === LIMIT) { r.outbox.push('I am handing this to a teammate who will reply shortly.'); return finish('escalated', 'loop_limit'); }
+    r.current_node_id = to;
+    if (!to) return finish('completed', 'completed');
     await saveRun(runId, { ...r, status: 'running' });
     return { next: 'continue' };
   };
+  const moveOn = (from: string) => go(from, flow.next(from));
   const fail = async (nodeId: string, error: string): Promise<Next> => {
     r.outbox.push("Sorry, I hit a problem on my side. A teammate will take a look and follow up.");
     await saveRun(runId, { ...r, status: 'failed', waiting_for: null });
@@ -139,43 +164,52 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   if (dec.kind === 'error') return fail(dec.nodeId, dec.error);
   if (dec.kind === 'case') {
     r.facts.cases[dec.nodeId] = { case_id: dec.caseId, reason: dec.reason };
-    const branch = index.get(dec.nodeId)!.node as BranchNode;
-    const chosen = branch.cases.find((c) => c.id === dec.caseId);
-    if (chosen?.steps[0]) {
-      r.current_node_id = chosen.steps[0].id;
-      await saveRun(runId, { ...r, status: 'running' });
-      return { next: 'continue' };
-    }
-    return moveOn(dec.nodeId);
+    return go(dec.nodeId, flow.afterCase(dec.nodeId, dec.caseId));
   }
   if (dec.kind === 'goto') {
-    // Jump forward (skip ahead): nothing re-runs, so just move on. Jump back (a loop): clear what the target and
-    // everything after it produced, so those steps run fresh. Both count against the repeat limit.
+    // Tree Go to step. Forward (skip ahead): nothing re-runs. Back (a loop): the target and what follows run fresh.
+    const index = flow.tree!;
     const g = index.get(dec.nodeId)!.node as GotoNode;
     const forward = (index.get(g.target)?.pos ?? -1) > index.get(g.id)!.pos;
-    r.facts.visits ??= {};
-    const visit = (r.facts.visits[g.id] ?? 1) + 1;
-    if (visit > g.max_visits) {
+    const visit = rerun(r, g.id, g.max_visits, g.fresh, forward ? [] : between(index, g.target, g.id));
+    if (visit === false) {
       r.outbox.push('I am handing this to a teammate who will reply shortly.');
       await addEvent(runId, g.id, 'system', 'goto_limit', { target: g.target, max_visits: g.max_visits });
       return finish('escalated', 'loop_limit');
-    }
-    r.facts.visits[g.id] = visit;
-    r.facts.since ??= {};
-    r.facts.previous ??= {};
-    const at = new Date().toISOString();
-    for (const id of forward ? [] : between(index, g.target, g.id)) {
-      // Last results stay visible as "previous", so the repeated steps know why the workflow came back.
-      if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
-      delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
-      r.facts.since[id] = { at, fresh: !!g.fresh };
-      // "Ask again": the customer's earlier answers to these steps no longer count.
-      if (g.fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
     }
     r.current_node_id = g.target;
     await addEvent(runId, g.id, 'system', 'goto_jumped', { target: g.target, visit, max_visits: g.max_visits, direction: forward ? 'forward' : 'back' });
     await saveRun(runId, { ...r, status: 'running' });
     return { next: 'continue' };
+  }
+  if (dec.kind === 'say') {
+    const text = renderInline((flow.node(dec.nodeId) as SayNode).content, shown);
+    if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
+    return moveOn(dec.nodeId);
+  }
+  if (dec.kind === 'ask') {
+    const node = flow.node(dec.nodeId) as AskNode;
+    if (dec.answer) {
+      (r.facts.vars ??= {})[node.saveAs] = dec.answer.value;
+      (r.facts.varsBy ??= {})[dec.nodeId] = [node.saveAs];
+      r.facts.outputs[dec.nodeId] = { [node.saveAs]: dec.answer.value };
+      delete r.facts.asked?.[dec.nodeId]; // answer used: a later visit asks again
+      return moveOn(dec.nodeId);
+    }
+    r.facts.attempts[dec.nodeId] = (r.facts.attempts[dec.nodeId] ?? 0) + 1;
+    if (r.facts.attempts[dec.nodeId] > 3) {
+      r.outbox.push('I am handing this to a teammate who will reply shortly.');
+      return finish('escalated', 'no valid answer after 3 tries');
+    }
+    // An empty prompt is fine: the text bubble before it usually asks the question.
+    const text = dec.invalid ? node.retry?.trim() || RETRY[node.format] : renderInline(node.prompt, shown);
+    if (text) r.outbox.push({ text, verbatim: true, nodeId: dec.nodeId });
+    (r.facts.asked ??= {})[dec.nodeId] = new Date().toISOString();
+    r.waiting_for = { type: 'customer', node_id: dec.nodeId, expects: [node.saveAs], remind_at: now + config.remindAfterSec * 1000,
+                      expires_at: now + config.expireAfterSec * 1000, reminded: false };
+    await saveRun(runId, { ...r, status: 'waiting_customer' });
+    await addEvent(runId, dec.nodeId, 'system', 'waiting', { for: 'customer', expects: [node.saveAs] });
+    return { next: 'wait', deadline: r.waiting_for.remind_at };
   }
 
   const { d, nodeId } = dec;
@@ -185,7 +219,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
 
   if (d.decision === 'complete') {
     // A step that mentions an action only completes once that action has run.
-    const node = index.get(nodeId)!.node as StepNode;
+    const node = flow.node(nodeId) as StepNode;
     if (stepActions(node.content).length && !(nodeId in r.facts.outputs)) {
       r.facts.attempts['!' + nodeId] = (r.facts.attempts['!' + nodeId] ?? 0) + 1;
       await addEvent(runId, nodeId, 'system', 'invalid_action', { error: 'step completed without calling its action' });
@@ -210,7 +244,15 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
 
   // call_action
   if (!out) return fail(nodeId, 'no action outcome');
-  if (out.status === 'done') { r.facts.outputs[nodeId] = out.output; say(d.message); return moveOn(nodeId); }
+  if (out.status === 'done') {
+    const first = !(nodeId in r.facts.outputs);
+    r.facts.outputs[nodeId] = out.output;
+    if (first) await keepResponse(runId, r, flow.node(nodeId) as StepNode, out.output);
+    // Nothing said yet: run the step once more so the AI can tell the customer what the result means.
+    if (first && !d.message?.trim()) { await saveRun(runId, { ...r, status: 'running' }); return { next: 'continue' }; }
+    say(d.message);
+    return moveOn(nodeId);
+  }
   if (out.status === 'escalated') { say(d.message || 'I am handing this to a teammate who will reply shortly.'); return finish('escalated', out.reason); }
   if (out.status === 'failed') return fail(nodeId, out.error);
   if (out.status === 'invalid') {
@@ -231,22 +273,38 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   return { next: 'wait', deadline: r.waiting_for.due_at };
 }
 
-// ④ Send everything this turn produced as one bot message.
+// ④ Send what this turn produced, in order: AI notes in a row merge into one reply; text bubbles go out as written.
 export async function flush(runId: string): Promise<string | null> {
   const run = await one<RunRow>('select * from workflow_run where id = $1', [runId]);
   if (!run?.outbox.length) return null;
-  let text: string;
-  try { text = await compose(run.outbox); } catch { text = run.outbox.join('\n\n'); }
-  const m = await one<{ id: string }>(`insert into message (conversation_id, role, text, run_id) values ($1, 'bot', $2, $3) returning id`,
-    [run.conversation_id, text, runId]);
+  const parts: { text: string; verbatim: boolean; nodeId?: string }[] = [];
+  let notes: string[] = [];
+  const merge = async () => {
+    if (!notes.length) return;
+    let text: string;
+    try { text = await compose(notes); } catch { text = notes.join('\n\n'); }
+    parts.push({ text, verbatim: false });
+    notes = [];
+  };
+  for (const item of run.outbox as OutboxItem[]) {
+    if (typeof item === 'string') notes.push(item);
+    else { await merge(); parts.push({ text: item.text, verbatim: true, nodeId: item.nodeId }); }
+  }
+  await merge();
+  let last: string | null = null;
+  for (const p of parts) {
+    const m = await one<{ id: string }>(`insert into message (conversation_id, role, text, run_id) values ($1, 'bot', $2, $3) returning id`,
+      [run.conversation_id, p.text, runId]);
+    await addEvent(runId, p.nodeId ?? run.current_node_id, p.verbatim ? 'system' : 'ai', 'message_sent', { text: p.text });
+    last = m!.id;
+  }
   await q(`update workflow_run set outbox = '[]'::jsonb where id = $1`, [runId]);
-  await addEvent(runId, run.current_node_id, 'ai', 'message_sent', { text });
-  return m!.id;
+  return last;
 }
 
 // ⑤ Apply one signal (or a timer when recv timed out) through the run state machine.
 export async function apply(runId: string, s: Signal | null): Promise<Next> {
-  const { run, index } = await loadRun(runId);
+  const { run, flow } = await loadRun(runId);
   const r: RunRow = { ...run, outbox: [...run.outbox] };
   const now = Date.now();
   const w = r.waiting_for;
@@ -308,10 +366,13 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
           return { next: 'wait', deadline: now + HOUR };
         }
         r.facts.outputs[nodeId] = res.result;
+        await keepResponse(runId, r, flow.node(nodeId) as StepNode, res.result);
       } else {
         r.facts.outputs[nodeId] = { approved: s.approved, reviewed_by: s.by, reviewer_note: s.note ?? '' };
       }
-      return resumeAt(nextAfter(index, nodeId));
+      const to = await follow(runId, r, flow, nodeId, flow.next(nodeId));
+      if (to === LIMIT) return end('escalated', 'loop_limit', 'I am handing this to a teammate who will reply shortly.');
+      return resumeAt(to);
     }
 
     case 'pause':
@@ -339,6 +400,58 @@ export async function apply(runId: string, s: Signal | null): Promise<Next> {
     case 'cancel':
       return end('cancelled', `cancelled by ${s.by}`);
   }
+}
+
+const LIMIT = Symbol('loop limit');
+
+// Copy the step's mapped response fields into variables, and log what was saved (or missing).
+async function keepResponse(runId: string, r: RunRow, step: StepNode | undefined, output: unknown) {
+  if (!step?.save?.length) return;
+  const { saved, missing } = saveResponse(r.facts, step.id, step.save, output);
+  await addEvent(runId, step.id, 'system', 'response_saved', { saved, missing });
+}
+
+// Repeat bookkeeping for a jump back: count the visit and clear what re-runs (results kept as "previous").
+// Returns the visit number, or false once a limited jump has been taken too often.
+function rerun(r: RunRow, key: string, max: number | undefined, fresh: boolean | undefined, ids: string[]): number | false {
+  r.facts.visits ??= {};
+  const visit = (r.facts.visits[key] ?? 1) + 1;
+  if (max && visit > max) return false;
+  r.facts.visits[key] = visit; // also feeds visitOf, so a re-run tool call gets a fresh idempotency key
+  r.facts.since ??= {};
+  r.facts.previous ??= {};
+  const at = new Date().toISOString();
+  for (const id of ids) {
+    if (id in r.facts.outputs) r.facts.previous[id] = r.facts.outputs[id];
+    delete r.facts.outputs[id]; delete r.facts.cases[id]; delete r.facts.attempts[id]; delete r.facts.attempts['!' + id];
+    delete r.facts.asked?.[id];
+    r.facts.since[id] = { at, fresh: !!fresh };
+    // "Ask again": the customer's earlier answers to these steps no longer count.
+    if (fresh) for (const k of r.facts.collectedBy?.[id] ?? []) delete r.facts.collected[k];
+    if (fresh) for (const k of r.facts.varsBy?.[id] ?? []) delete r.facts.vars?.[k];
+  }
+  return visit;
+}
+
+// Leave `from` along `jump`. Canvas runs keep a trail of finished items: an arrow back to one already on it is a loop.
+async function follow(runId: string, r: RunRow, flow: Flow, from: string, jump: Jump): Promise<string | null | typeof LIMIT> {
+  r.facts.attempts[from] = 0;
+  r.facts.attempts['!' + from] = 0;
+  if (flow.kind !== 'graph') return jump.to;
+  const trail = [...(r.facts.trail ?? []), from];
+  r.facts.trail = trail;
+  if (!jump.to || !jump.edge) return jump.to;
+  const back = trail.lastIndexOf(jump.to);
+  if (back < 0) return jump.to;
+  const e = jump.edge;
+  const visit = rerun(r, e.id, e.maxVisits, e.fresh, trail.slice(back));
+  if (visit === false) {
+    await addEvent(runId, from, 'system', 'goto_limit', { target: jump.to, max_visits: e.maxVisits });
+    return LIMIT;
+  }
+  r.facts.trail = trail.slice(0, back);
+  await addEvent(runId, from, 'system', 'goto_jumped', { target: jump.to, visit, max_visits: e.maxVisits ?? null, direction: 'back' });
+  return jump.to;
 }
 
 async function openTask(run: RunRow, nodeId: string, t: {

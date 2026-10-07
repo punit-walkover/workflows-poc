@@ -2,7 +2,8 @@ import { BadRequestException, Logger } from '@nestjs/common';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { one, q } from '../db';
 import { freeReply, gate, route } from '../llm/decider';
-import { ACTIVE, RunStatus, Signal, WorkflowNode } from '../types';
+import { ACTIVE, RunStatus, Signal, WorkflowGraph, WorkflowNode } from '../types';
+import { flowOf } from './flow';
 import { loadTranscript } from './context';
 import { addEvent } from './events';
 import { runWorkflow } from './workflow';
@@ -56,14 +57,14 @@ export async function onCustomerMessage(conversationId: string, messageId: strin
 }
 
 export async function startRun(conversationId: string, versionId: string, reason: string) {
-  const v = await one<{ steps: WorkflowNode[]; name: string; version: number }>('select steps, name, version from workflow_version where id = $1', [versionId]);
+  const v = await one<{ steps: WorkflowNode[]; graph: WorkflowGraph | null; name: string; version: number }>('select steps, graph, name, version from workflow_version where id = $1', [versionId]);
   const conv = await one<{ customer_name: string; customer_email: string }>('select * from conversation where id = $1', [conversationId]);
   // The sender's identity is known up front, so steps never ask for it.
   const facts = { collected: { customer_name: conv!.customer_name, email: conv!.customer_email }, outputs: {}, cases: {}, attempts: {}, visits: {} };
   let run: { id: string } | null;
   try {
     run = await one(`insert into workflow_run (conversation_id, workflow_version_id, current_node_id, facts) values ($1, $2, $3, $4) returning id`,
-      [conversationId, versionId, v!.steps[0]?.id ?? null, JSON.stringify(facts)]);
+      [conversationId, versionId, flowOf(v!).first(), JSON.stringify(facts)]);
   } catch (e: any) {
     if (e.code === '23505') return log.warn('run already active for conversation'); // unique active-run index
     throw e;

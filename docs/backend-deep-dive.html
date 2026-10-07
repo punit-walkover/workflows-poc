@@ -1,0 +1,703 @@
+<title>Workflows POC Backend</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: long reference page — sticky contents rail + one reading column; code and tables scroll inside their own boxes. */
+:root {
+  --bg: #f6f7f9; --panel: #ffffff; --ink: #1b2130; --ink-2: #4b5567; --line: #dfe3ea;
+  --accent: #2c5fc9; --accent-soft: #e7eefb; --code: #eef1f6;
+  --ok: #23824f; --ok-soft: #e4f4ea; --warn: #93650f; --warn-soft: #fbf1dc; --bad: #b3261e; --bad-soft: #fbe6e4;
+  --dot: #d6dbe5;
+  --display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --body: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #111419; --panel: #191d25; --ink: #e5e8ee; --ink-2: #a3abbb; --line: #2b313d;
+  --accent: #82a5ff; --accent-soft: #1d2842; --code: #202631;
+  --ok: #6fd19a; --ok-soft: #163225; --warn: #e3b25c; --warn-soft: #382d18; --bad: #f08a80; --bad-soft: #3b1d1b; --dot: #252b37; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #111419; --panel: #191d25; --ink: #e5e8ee; --ink-2: #a3abbb; --line: #2b313d;
+  --accent: #82a5ff; --accent-soft: #1d2842; --code: #202631;
+  --ok: #6fd19a; --ok-soft: #163225; --warn: #e3b25c; --warn-soft: #382d18; --bad: #f08a80; --bad-soft: #3b1d1b; --dot: #252b37; color-scheme: dark }
+
+* { box-sizing: border-box }
+html { scroll-behavior: smooth }
+body { background: var(--bg); color: var(--ink); font: 17px/1.65 var(--body); padding-inline: 16px; padding-block: 0 72px }
+.wrap { max-width: 1120px; margin: 0 auto; display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 48px }
+@media (max-width: 880px) { .wrap { grid-template-columns: minmax(0, 1fr) } nav.toc { display: none } }
+
+header.hero { max-width: 1120px; margin: 0 auto 36px; padding-block: 44px 28px; border-bottom: 1px solid var(--line);
+  background-image: radial-gradient(var(--dot) 1.2px, transparent 1.2px); background-size: 22px 22px }
+.eyebrow { font: 500 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent) }
+h1 { font: 700 clamp(30px, 5vw, 46px)/1.1 var(--display); margin: 12px 0 14px; text-wrap: balance; letter-spacing: -.01em }
+.lede { font-size: 19px; color: var(--ink-2); max-width: 66ch; margin: 0 }
+.meta { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px }
+.chip { font: 500 12px/1 var(--mono); padding: 6px 9px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink-2) }
+
+nav.toc { position: sticky; top: calc(env(safe-area-inset-top, 0px) + 20px); align-self: start; font: 13.5px/1.45 var(--display); max-height: calc(100vh - 40px); overflow-y: auto; padding-bottom: 20px }
+nav.toc .grp { font: 600 11px/1 var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); margin: 14px 0 6px }
+nav.toc .grp:first-child { margin-top: 0 }
+nav.toc a { display: block; color: var(--ink-2); text-decoration: none; padding: 2px 0 }
+nav.toc a:hover, nav.toc a:focus-visible { color: var(--ink) }
+
+main { min-width: 0 }
+section { padding-block: 6px 26px; border-bottom: 1px solid var(--line); margin-bottom: 26px; scroll-margin-top: 16px }
+section:last-child { border-bottom: 0 }
+.part { font: 600 12px/1 var(--mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); margin: 8px 0 18px }
+h2 { font: 700 25px/1.25 var(--display); margin: 0 0 10px; text-wrap: balance }
+h3 { font: 600 17.5px/1.3 var(--display); margin: 22px 0 8px }
+p, li { max-width: 72ch }
+p { margin: 0 0 12px }
+ul, ol { padding-left: 22px; margin: 0 0 12px }
+li { margin-bottom: 4px }
+code { font: 13.5px var(--mono); background: var(--code); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere }
+pre { font: 13px/1.55 var(--mono); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 13px 15px; overflow-x: auto; margin: 0 0 14px }
+pre code { background: none; padding: 0; overflow-wrap: normal }
+a { color: var(--accent) }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.file { font: 12.5px var(--mono); color: var(--ink-2) }
+
+.scroll { overflow-x: auto; margin: 0 0 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel) }
+table { border-collapse: collapse; width: 100%; font-size: 14.5px; min-width: 620px }
+th, td { text-align: left; padding: 8px 11px; border-bottom: 1px solid var(--line); vertical-align: top }
+th { font: 600 11.5px/1.3 var(--display); text-transform: uppercase; letter-spacing: .06em; color: var(--ink-2); background: var(--bg) }
+tr:last-child td { border-bottom: 0 }
+td code { white-space: nowrap }
+.diagram { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow-x: auto; margin: 0 0 14px }
+.note { border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 11px 15px; border-radius: 0 8px 8px 0; margin: 0 0 14px; max-width: 76ch; font-size: 16px }
+.note strong { font-family: var(--display) }
+.tip { border-left: 3px solid var(--accent); background: var(--accent-soft); padding: 11px 15px; border-radius: 0 8px 8px 0; margin: 0 0 14px; max-width: 76ch; font-size: 16px }
+.flags li { margin-bottom: 8px }
+.sev { display: inline-block; font: 500 11.5px/1.5 var(--mono); padding: 0 7px; border-radius: 99px; margin-right: 6px }
+.sev.hi { background: var(--bad-soft); color: var(--bad) }
+.sev.md { background: var(--warn-soft); color: var(--warn) }
+.sev.lo { background: var(--code); color: var(--ink-2) }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto } }
+</style>
+
+<header class="hero">
+  <div class="eyebrow">Ticket0 · Workflows POC · Backend reference</div>
+  <h1>How the Workflows POC backend works</h1>
+  <p class="lede">A walk through the server, feature by feature: what each part does, which file does it, and how a customer message becomes a durable, step-by-step workflow run that can wait for people, call tools, and loop safely.</p>
+  <div class="meta">
+    <span class="chip">server/ · NestJS + DBOS · :4001</span>
+    <span class="chip">web/ · Next.js 16 · :4000</span>
+    <span class="chip">Postgres · workflows_poc</span>
+    <span class="chip">LLM · GTWY (gpt-6-luna)</span>
+    <span class="chip">Tools · viaSocket</span>
+  </div>
+</header>
+
+<div class="wrap">
+<nav class="toc" aria-label="Contents">
+  <div class="grp">Foundations</div>
+  <a href="#map">The big picture</a>
+  <a href="#boot">Boot, config, env</a>
+  <a href="#db">Database</a>
+  <div class="grp">Building workflows</div>
+  <a href="#lifecycle">Create, save, publish</a>
+  <a href="#formats">List and canvas formats</a>
+  <a href="#validation">Validation</a>
+  <a href="#templates">Templates and seeding</a>
+  <div class="grp">Running workflows</div>
+  <a href="#routing">Routing a message</a>
+  <a href="#loop">The durable run loop</a>
+  <a href="#flow">Finding the next block</a>
+  <a href="#aistep">AI steps</a>
+  <a href="#conditions">Conditions</a>
+  <a href="#blocks">Bubbles and inputs</a>
+  <a href="#vars">Variables and Save response</a>
+  <a href="#loops">Go to step and loops</a>
+  <a href="#messages">Sending messages</a>
+  <a href="#waits">Waiting, reminders, expiry</a>
+  <a href="#control">Signals and run control</a>
+  <div class="grp">Tools and people</div>
+  <a href="#actions">Actions</a>
+  <a href="#viasocket">viaSocket tools</a>
+  <a href="#approvals">Approvals</a>
+  <a href="#gtwy">GTWY (the LLM)</a>
+  <div class="grp">Channels</div>
+  <a href="#playground">Playground API</a>
+  <a href="#widget">Chat widget API</a>
+  <a href="#observe">Run panel and observability</a>
+  <div class="grp">Reference</div>
+  <a href="#api">All endpoints</a>
+  <a href="#flags">Known gaps</a>
+</nav>
+
+<main>
+
+<div class="part">Foundations</div>
+
+<section id="map">
+  <h2>The big picture</h2>
+  <p>The POC is two apps. <b>web/</b> is the editor and playground. <b>server/</b> owns everything that matters: workflows, runs, actions, approvals, and every call to the LLM and to viaSocket. The web app only talks to the server over HTTP and polls for updates.</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart LR
+  subgraph Web[web · Next.js]
+    E[Workflow editor<br/>list + canvas]
+    P[Playground + run panel]
+    W[Chat widget]
+  end
+  subgraph Server[server · NestJS]
+    C[Controllers]
+    R[Runner<br/>DBOS durable workflow]
+    A[Actions]
+    L[LLM layer]
+  end
+  DB[(Postgres<br/>app tables + dbos schema)]
+  G[GTWY<br/>chat completions]
+  V[viaSocket<br/>flows + apps]
+  E & P & W -->|HTTP JSON| C
+  C --> R
+  C --> DB
+  R --> L --> G
+  R --> A --> V
+  R --> DB
+  A --> DB
+  </pre></div>
+  <p>Three ideas carry the whole design:</p>
+  <ol>
+    <li><b>A workflow is data.</b> It is JSON (a list tree or a canvas graph) stored in Postgres. Publishing freezes a copy as a version; runs always point at a version, so editing never disturbs a live conversation.</li>
+    <li><b>A run is a durable loop.</b> Each conversation's run is one DBOS workflow. Every unit of work is a checkpointed step, so a crash or restart resumes exactly where it stopped, without repeating side effects.</li>
+    <li><b>The AI decides; the code acts.</b> The LLM only returns a JSON decision ("ask the customer", "call this action", "this case is true"). The server validates that decision and does the work itself: running tools, opening approvals, moving the cursor.</li>
+  </ol>
+</section>
+
+<section id="boot">
+  <h2>Boot, config, env</h2>
+  <p class="file">src/main.ts · src/app.module.ts · src/config.ts · src/db.ts</p>
+  <ol>
+    <li><code>main.ts</code> imports <code>runner/workflow</code> first, so the DBOS workflow function is registered before launch.</li>
+    <li><code>DBOS.setConfig({ name: 'workflows-poc', systemDatabaseUrl: DATABASE_URL })</code> then <code>DBOS.launch()</code>. DBOS keeps its own tables in the <code>dbos</code> schema of the same database, and on launch it <b>resumes every unfinished run</b>.</li>
+    <li><code>seedWorkflows()</code> creates and publishes the templates if the workflow table is empty.</li>
+    <li>Nest starts with an 8 MB JSON body limit (attachments arrive as base64), CORS for <code>CORS_ORIGINS</code>, and listens on <code>PORT</code>.</li>
+  </ol>
+  <p><code>AppModule</code> only registers controllers (Workflows, Actions, Integrations, Playground, Widget, Runs). There are no Nest providers; services are plain exported functions. <code>db.ts</code> is a <code>pg</code> pool (max 10) with three helpers: <code>q</code> (rows), <code>one</code> (first row or null) and <code>tx</code> (begin/commit/rollback).</p>
+  <h3>Settings</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Setting / env</th><th>Default</th><th>Used for</th></tr></thead>
+    <tbody>
+      <tr><td><code>PORT</code>, <code>CORS_ORIGINS</code></td><td>4001, localhost:4000</td><td>HTTP server</td></tr>
+      <tr><td><code>DATABASE_URL</code></td><td>required</td><td>App tables and DBOS system tables</td></tr>
+      <tr><td><code>GTWY_ORG_ID</code>, <code>GTWY_FOLDER_ID</code>, <code>GTWY_ACCESS_KEY</code></td><td>required</td><td>Signing the GTWY embed login token</td></tr>
+      <tr><td><code>GTWY_DB_BASE_URL</code>, <code>GTWY_SERVICE</code>, <code>GTWY_MODEL</code></td><td>db.gtwy.ai, openai, gpt-6-luna</td><td>Creating the agent and choosing the model</td></tr>
+      <tr><td><code>REMIND_AFTER_SEC</code> / <code>EXPIRE_AFTER_SEC</code></td><td>120 / 600</td><td>Customer reply reminder and expiry</td></tr>
+      <tr><td><code>APPROVAL_TIMEOUT_SEC</code></td><td>1800</td><td>When an approval task is due</td></tr>
+      <tr><td><code>VIASOCKET_ORG_ID</code>, <code>VIASOCKET_PROJECT_ID</code>, <code>VIASOCKET_EMBED_SECRET</code>, <code>VIASOCKET_UID</code></td><td>uid: workflows-poc</td><td>viaSocket builder token and SDK</td></tr>
+      <tr><td><code>POC_ENCRYPTION_KEY</code></td><td>—</td><td>Decrypting stored viaSocket app connections</td></tr>
+      <tr><td><code>UPLOADS_DIR</code></td><td>&lt;cwd&gt;/uploads</td><td>Attachment files</td></tr>
+      <tr><td>Hard limits in <code>config.ts</code></td><td>15 steps, depth 2, 100 visits, 50 canvas steps</td><td>Validation</td></tr>
+    </tbody>
+  </table></div>
+  <p>Migrations run with <code>npm run db:setup</code> (<code>scripts/setup-db.js</code>): it creates the database if needed and applies each <code>migrations/*.sql</code> once, in order, tracked in <code>schema_migrations</code>.</p>
+</section>
+
+<section id="db">
+  <h2>Database</h2>
+  <p>Eleven app tables plus DBOS's own schema. JSON columns hold the shapes that change often (workflow definitions, run facts), so most features needed no migration.</p>
+  <div class="diagram"><pre class="mermaid">
+erDiagram
+  workflow ||--o{ workflow_version : "publishes"
+  workflow }o--|| workflow_version : "published_version_id"
+  workflow_version ||--o{ workflow_run : "runs as"
+  conversation ||--o{ workflow_run : has
+  conversation ||--o{ message : has
+  conversation ||--o{ attachment : has
+  conversation ||--o{ approval_task : has
+  workflow_run ||--o{ run_event : logs
+  workflow_run ||--o{ approval_task : opens
+  workflow_run ||--o{ action_run : calls
+  workflow_run ||--o{ message : sends
+  approval_task ||--o{ action_run : "approves"
+  </pre></div>
+  <div class="scroll"><table>
+    <thead><tr><th>Table</th><th>Holds</th><th>Notable columns and rules</th></tr></thead>
+    <tbody>
+      <tr><td><code>workflow</code></td><td>The editable draft</td><td><code>steps</code> (list tree), <code>graph</code> (canvas), <code>row_version</code> for safe saves, <code>enabled</code>, <code>archived_at</code>; name unique among non-archived</td></tr>
+      <tr><td><code>workflow_version</code></td><td>Frozen published copies</td><td>name, when_to_use, steps, graph, action_keys; unique (workflow_id, version)</td></tr>
+      <tr><td><code>conversation</code></td><td>One chat</td><td>customer name/email, <code>channel</code> playground | widget</td></tr>
+      <tr><td><code>message</code></td><td>Chat lines</td><td><code>role</code> customer | bot | team | system, <code>attachment_ids</code>, <code>run_id</code></td></tr>
+      <tr><td><code>attachment</code></td><td>Uploaded files</td><td>sha256, size, path on disk</td></tr>
+      <tr><td><code>workflow_run</code></td><td>One run of a version</td><td><code>status</code>, <code>current_node_id</code>, <code>facts</code>, <code>waiting_for</code>, <code>outbox</code>, <code>paused_from</code>; at most one active run per conversation (partial unique index)</td></tr>
+      <tr><td><code>run_event</code></td><td>The run's timeline</td><td>node_id, actor, type, data</td></tr>
+      <tr><td><code>approval_task</code></td><td>A request for a human decision</td><td><code>kind</code> evidence | action, args, amount, status, due_at; one pending per run+node</td></tr>
+      <tr><td><code>action</code></td><td>The tool registry</td><td>key, input_schema, kind, <code>requires_approval</code>, <code>source</code> builtin | mock | viasocket | viasocket_flow, flow URL</td></tr>
+      <tr><td><code>action_run</code></td><td>Every tool call</td><td><code>idempotency_key</code> (unique), mode auto | approved, args, result, error, visit</td></tr>
+      <tr><td><code>shop_order</code></td><td>Demo orders for the mock tools</td><td>delivered_at, items, total_minor, refunded_minor</td></tr>
+      <tr><td><code>app_connection</code>, <code>app_setting</code></td><td>viaSocket app connections, GTWY agent id</td><td><code>script_id_enc</code> is AES-256-GCM encrypted</td></tr>
+    </tbody>
+  </table></div>
+  <h3>What lives inside <code>workflow_run.facts</code></h3>
+<pre><code>{
+  collected:   { ... },          // what the AI noted from the chat (its scratchpad)
+  vars:        { order_id: 4512, delivery_date: "2026-09-24" },  // workflow variables: inputs + saved responses
+  varsBy:      { i1: ["order_id"], s1: ["delivery_date"] },       // which block filled which variable
+  outputs:     { s2: { found: true, ... } },  // each block's result (action responses, approvals, answers)
+  cases:       { b1: { case_id: "c1", reason } },                 // which branch each condition took
+  attempts:    { s1: 1, "!s1": 0 },        // ask counts and invalid-action retries per block
+  visits:      { e9: 2 },                   // loop counters per Go to / loop arrow
+  since, previous, collectedBy, asked, trail // loop bookkeeping (see "Go to step and loops")
+}</code></pre>
+</section>
+
+<div class="part">Building workflows</div>
+
+<section id="lifecycle">
+  <h2>Create, save, publish</h2>
+  <p class="file">src/workflows/workflows.service.ts · workflows.controller.ts</p>
+  <div class="diagram"><pre class="mermaid">
+stateDiagram-v2
+  [*] --> Draft: POST /workflows
+  Draft --> Draft: PUT /workflows/:id (save, may have issues)
+  Draft --> Published: POST /publish (no issues)
+  Published --> Draft: edit → has_unpublished_changes
+  Published --> Enabled: publish turns it on
+  Enabled --> Disabled: PATCH enabled=false
+  Disabled --> Enabled: PATCH enabled=true (needs a published version)
+  Draft --> Archived: DELETE
+  Enabled --> Archived: DELETE
+  </pre></div>
+  <ul>
+    <li><b>Create</b>: from a template or one empty step. A clashing name gets a number suffix.</li>
+    <li><b>Save</b> (<code>saveWorkflow</code>): validates, but a draft may be saved with issues. Optimistic concurrency: the update only applies <code>WHERE row_version = $sent</code> and bumps it. If someone else saved first, the server returns <b>409</b> ("changed elsewhere, reload"). <code>steps</code> or <code>graph</code> left out of the body keep their current value.</li>
+    <li><b>Publish</b> (<code>publishWorkflow</code>): refuses with 400 and the issue list if validation fails. In one transaction it inserts <code>workflow_version</code> = next number with a copy of name, when_to_use, steps, graph and action_keys, points <code>published_version_id</code> at it, clears <code>has_unpublished_changes</code> and sets <code>enabled = true</code>.</li>
+    <li><b>Enable/disable</b> (<code>PATCH</code>): enabling needs a published version. Only enabled, non-archived, published workflows are candidates for routing.</li>
+    <li><b>Archive</b> (<code>DELETE</code>): sets <code>archived_at</code> and disables. Versions stay, so old runs still resolve, and the name becomes reusable.</li>
+  </ul>
+  <div class="tip">Runs hold a <code>workflow_version_id</code>, never a workflow id. Publishing v2 while a v1 run is waiting for the customer changes nothing for that run.</div>
+</section>
+
+<section id="formats">
+  <h2>List and canvas formats</h2>
+  <p class="file">src/types.ts · src/workflows/tree.ts · src/workflows/graph.ts</p>
+  <p>A workflow is stored in one of two shapes. Both use the same inline text format: an array of parts, <code>{t:'text'}</code>, <code>{t:'action', key}</code> for <code>@action</code>, and <code>{t:'var', key}</code> for <code>{{variable}}</code>.</p>
+  <h3>List tree (<code>workflow.steps</code>)</h3>
+<pre><code>step   { id, type:'step', content }                         // an AI instruction
+branch { id, type:'branch', cases:[{ id, kind:'if'|'else_if'|'else', condition, steps:[...] }] }
+goto   { id, type:'goto', target, max_visits, fresh? }       // jump to another node</code></pre>
+  <h3>Canvas graph (<code>workflow.graph</code>)</h3>
+<pre><code>{ start, variables?: ["order_id", ...],
+  groups: [{ id, title, x, y, items: [
+      { type:'step',      content, save?: [{ path, var }] }          // AI step (+ Save response)
+      { type:'bubble',    content }                                  // fixed message
+      { type:'input',     prompt, saveAs, format, retry? }           // ask, check, save
+      { type:'condition', mode?:'ai'|'rules', cases:[{ kind, condition, rules?, join? }] } ] }],
+  edges: [{ id, from:{ groupId, itemId?, port? }, to:{ groupId, itemId? }, maxVisits?, fresh? }] }</code></pre>
+  <p>An edge starts from a group's end (no <code>itemId</code>) or from one case of a condition (<code>itemId</code> + <code>port</code> = case id). It lands on a group (start at its first item) or on one item inside a group.</p>
+  <h3>Converting a list to a canvas</h3>
+  <p><code>POST /workflows/:id/canvas</code> runs <code>treeToGraph(steps)</code> and saves the result as the draft's graph. Item ids are kept, so history lines up. A condition ends its group: each case gets its own group, a "Then" group collects what follows, and every case joins it. A Go to becomes an edge to its target with the same limit. Empty groups are bypassed. <code>layout()</code> places groups in columns by distance from Start.</p>
+</section>
+
+<section id="validation">
+  <h2>Validation</h2>
+  <p class="file">src/workflows/validator.ts (list) · src/workflows/graph.ts validateGraph (canvas)</p>
+  <p>The same check runs on every save (to show issues) and on publish (to block). Both validators return <code>{ issues, action_keys, step_count }</code>.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Rule</th><th>List</th><th>Canvas</th></tr></thead>
+    <tbody>
+      <tr><td>Ids present and unique</td><td>✓</td><td>✓</td></tr>
+      <tr><td>No empty steps, conditions or bubbles</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Conditions start with If, Else last</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Nesting depth</td><td>max 2</td><td>n/a</td></tr>
+      <tr><td>Step limit</td><td>1–15 steps</td><td>up to 50 non-condition blocks</td></tr>
+      <tr><td>Every <code>@action</code> exists and is enabled</td><td>✓</td><td>✓</td></tr>
+      <tr><td>Every <code>{{var}}</code> is built-in or declared</td><td>built-in only</td><td>built-in or <code>graph.variables</code></td></tr>
+      <tr><td>Go to target exists; limit 1–100</td><td>✓</td><td>edge limit 1–100</td></tr>
+      <tr><td>Every group reachable from Start</td><td>—</td><td>BFS over edges</td></tr>
+      <tr><td>One arrow per output; arrows point at things that exist</td><td>—</td><td>✓</td></tr>
+      <tr><td>Every loop has a limited arrow</td><td>—</td><td>Tarjan strongly connected components</td></tr>
+      <tr><td>Input has a variable; rules have a variable and known operator</td><td>—</td><td>✓</td></tr>
+      <tr><td>Save response needs an <code>@action</code>, a path and a variable per row</td><td>—</td><td>✓</td></tr>
+    </tbody>
+  </table></div>
+  <p>The loop rule is what makes canvas runs always finish: every cycle of groups must contain at least one arrow with <code>maxVisits</code>, and the runner enforces that limit.</p>
+</section>
+
+<section id="templates">
+  <h2>Templates and seeding</h2>
+  <p class="file">src/workflows/templates.ts</p>
+  <p>Two list-format templates: <b>Order refund</b> (ask → <code>@lookup_order</code> → within 30 days: <code>@refund_order</code> and confirm; older: <code>@escalate_to_human</code>; not found: explain) and <b>Damaged item return</b> (adds a photo, <code>@request_approval</code>, and a Go to back to the photo step with <code>max_visits: 2, fresh: true</code> when the photo is unclear). On first boot with an empty table, both are created and published.</p>
+</section>
+
+<div class="part">Running workflows</div>
+
+<section id="routing">
+  <h2>Routing a message</h2>
+  <p class="file">src/playground/conversations.ts · src/runner/run-control.ts onCustomerMessage · src/llm/decider.ts route, gate</p>
+  <div class="diagram"><pre class="mermaid">
+flowchart TD
+  M[Customer message saved] --> A{Active run?}
+  A -- yes --> S[signal run: customer_message]
+  A -- no --> E{Last run escalated?}
+  E -- yes --> Q[system note: bot stays quiet]
+  E -- no --> R[route: LLM picks a workflow]
+  R --> G{gate}
+  G -- wants_human ≥ 0.8 --> H[bot: passing you to a teammate]
+  G -- confidence ≥ 0.7 --> ST[startRun with published version]
+  G -- 0.4–0.7 + question --> CL[bot asks the clarifying question]
+  G -- else --> FR[freeReply: plain helpful answer]
+  </pre></div>
+  <ul>
+    <li><code>postCustomerMessage</code> inserts the message and fires <code>onCustomerMessage</code> without waiting, so the HTTP call returns immediately and the client polls.</li>
+    <li><code>route()</code> sends the enabled workflows (id, name, when to use) and the last 6 messages to the LLM and gets back <code>{ workflow_id, confidence, wants_human, question, reason }</code>. An unknown id is treated as no match.</li>
+    <li><code>gate()</code> turns that into one of four outcomes using fixed thresholds. Every outcome is logged as a <code>system</code> message ("Routing: start (confidence 0.99) …"), which the playground shows and the widget hides.</li>
+  </ul>
+</section>
+
+<section id="loop">
+  <h2>The durable run loop</h2>
+  <p class="file">src/runner/workflow.ts · src/runner/steps.ts · src/runner/run-control.ts startRun</p>
+  <p><code>startRun</code> inserts the <code>workflow_run</code> row (cursor = first block, facts seeded with the customer's name and email), logs <code>run_started</code>, and starts the DBOS workflow with id <code>run:&lt;runId&gt;</code>. That id makes the start idempotent and lets anyone send it signals.</p>
+<pre><code>for (;;) {
+  if (mode === 'run') {
+    dec = runStep(decide)              // ① what should happen at the cursor?
+    out = dec is call_action ? runStep(act) : null   // ② run the tool / open approval
+    r   = runStep(advance)             // ③ apply: facts, cursor, status
+    if (r.next === 'continue') continue   //    next block right away, same turn
+    runStep(flush)                     // ④ send this turn's messages
+    if (r.next === 'end') return
+  }
+  s = DBOS.recv('signal', deadline)    // ⑤ sleep until a signal or a timer
+  a = runStep(apply(s))                //    customer reply, approval, pause, timer…
+  runStep(flush)
+  mode = a.next === 'run' ? 'run' : 'wait'
+}</code></pre>
+  <p>Each <code>runStep</code> is checkpointed by DBOS. On restart, completed steps return their saved result instead of running again, so a tool call or an LLM decision is never repeated. Every step reads fresh state with <code>loadRun()</code> and writes it with <code>saveRun()</code>; nothing important lives in workflow memory.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Step</th><th>Job</th><th>Calls the AI?</th></tr></thead>
+    <tbody>
+      <tr><td><code>decide</code></td><td>Looks at the block under the cursor and returns a <code>Decision</code>: end, error, case, goto, say, ask, or step (with the AI's decision)</td><td>Only for AI steps and AI conditions</td></tr>
+      <tr><td><code>act</code></td><td>Validates the chosen action and runs it, or opens an approval task, or escalates</td><td>No</td></tr>
+      <tr><td><code>advance</code></td><td>Stores results and variables, moves the cursor (following edges), sets the status and what to wait for</td><td>No</td></tr>
+      <tr><td><code>flush</code></td><td>Turns the outbox into chat messages</td><td>Only to merge several AI notes</td></tr>
+      <tr><td><code>apply</code></td><td>Handles a signal or a timer through the run's state machine</td><td>No</td></tr>
+    </tbody>
+  </table></div>
+  <p>Run statuses: <code>running</code>, <code>waiting_customer</code>, <code>waiting_approval</code>, <code>paused</code>, <code>failed</code> (all "active"), and the terminal <code>completed</code>, <code>escalated</code>, <code>expired</code>, <code>cancelled</code>.</p>
+</section>
+
+<section id="flow">
+  <h2>Finding the next block</h2>
+  <p class="file">src/runner/flow.ts</p>
+  <p>The runner never reads the workflow JSON directly. It asks a <code>Flow</code>, built by <code>flowOf(version)</code>: a <code>graphFlow</code> when the version has a graph, otherwise a <code>treeFlow</code>.</p>
+<pre><code>interface Flow {
+  first()                    // where a run starts
+  node(id)                   // the block as a runner node: step | branch | goto | say | ask
+  next(id)                   // after a block finishes
+  afterCase(id, caseId)      // after a condition picks a case
+}</code></pre>
+  <ul>
+    <li><b>treeFlow</b>: next sibling, else the node after the enclosing branch. A case continues at its first step.</li>
+    <li><b>graphFlow</b>: next item in the same group; at the end of the group, follow the group's "then" arrow; no arrow means the run is done. A case follows its port's arrow; a case with no arrow falls through to the next item. Bubbles map to <code>say</code> nodes, inputs to <code>ask</code>, conditions to <code>branch</code> (with their <code>mode</code>).</li>
+  </ul>
+  <p>Every move goes through <code>follow()</code> in steps.ts, which resets attempt counters and, for graphs, maintains the trail used to detect loops.</p>
+</section>
+
+<section id="aistep">
+  <h2>AI steps</h2>
+  <p class="file">src/runner/steps.ts decide/act/advance · src/llm/decider.ts decideStep</p>
+  <p><code>decideStep</code> sends the step text (with variables filled in), the allowed actions and their argument schemas, the customer, the known facts (<code>collected</code>, <code>variables</code>, <code>outputs</code>, previous results) and the transcript. The model must answer one JSON object:</p>
+<pre><code>{ "decision": "complete" | "ask_customer" | "call_action" | "escalate",
+  "message": "…", "collected": {}, "missing": [], "action": { "key": "", "args": {} }, "reason": "…" }</code></pre>
+  <div class="scroll"><table>
+    <thead><tr><th>Decision</th><th>What the runner does</th></tr></thead>
+    <tbody>
+      <tr><td><code>complete</code></td><td>Says the message and moves on. A step that mentions an action can't complete before that action has run; the runner counts it as invalid and asks again (max 2, then the run fails).</td></tr>
+      <tr><td><code>ask_customer</code></td><td>Says the message, sets <code>waiting_for</code> customer (with reminder and expiry), status <code>waiting_customer</code>. After 3 asks on one step, it escalates.</td></tr>
+      <tr><td><code>call_action</code></td><td><code>act</code> checks the action is mentioned in the step and enabled, validates the args, then executes it or opens an approval. On success the result goes to <code>outputs[stepId]</code> and Save response runs.</td></tr>
+      <tr><td><code>escalate</code></td><td>Says the message and ends the run as <code>escalated</code>.</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Speaking after an action</h3>
+  <p>The AI writes its message before it sees the action's result. So when an action succeeds and the AI said nothing yet, the runner <b>runs the same step once more</b>. The prompt then says "this step's action already ran, its result is <code>outputs.&lt;id&gt;</code>, don't call it again; complete with a message". If the model asks for the action again anyway, <code>act</code> returns the stored result instead of running it twice.</p>
+  <p><code>decide</code> retries the LLM call once on failure. Invalid actions (not allowed, disabled, bad args) are retried up to twice with a "follow the rules exactly" hint before the run fails.</p>
+</section>
+
+<section id="conditions">
+  <h2>Conditions</h2>
+  <p class="file">src/llm/decider.ts chooseCase · src/runner/blocks.ts chooseByRules</p>
+  <ul>
+    <li><b>AI mode</b>: <code>chooseCase</code> sends every non-else condition with its id, the facts and the last 6 messages. The model judges each one true or false with a reason; the <b>code</b> then picks the first true case, else the Else case, else none.</li>
+    <li><b>Rules mode</b> (canvas): no AI. <code>chooseByRules</code> checks each case's rules against the run's values (<code>collected</code> + built-ins + workflow variables). Operators: <code>=</code>, <code>!=</code>, <code>contains</code> (text, case-insensitive), <code>&gt;</code>, <code>&lt;</code> (numbers), <code>empty</code>, <code>not_empty</code>, joined by AND or OR. The first matching case wins; Else catches the rest.</li>
+  </ul>
+  <p>Either way the result is stored in <code>facts.cases[conditionId]</code>, logged as <code>case_chosen</code>, and the run follows <code>flow.afterCase()</code>.</p>
+</section>
+
+<section id="blocks">
+  <h2>Bubbles and inputs</h2>
+  <p class="file">src/runner/steps.ts · src/runner/blocks.ts checkAnswer</p>
+  <h3>Text bubble</h3>
+  <p><code>decide</code> returns <code>{ kind:'say' }</code> without calling the AI. <code>advance</code> renders the text (a declared variable with no value shows as blank) and pushes it to the outbox as <b>verbatim</b>, then moves on in the same turn. Several bubbles in a row become several chat messages.</p>
+  <h3>Input</h3>
+  <ol>
+    <li>First visit: <code>decide</code> sees no <code>facts.asked[id]</code> and returns "ask". <code>advance</code> sends the prompt verbatim (if any), records <code>asked[id] = now</code>, and waits for the customer.</li>
+    <li>When the customer replies, the run resumes at the same block. <code>decide</code> takes the first customer message after <code>asked[id]</code> and runs <code>checkAnswer(format, text)</code>:
+      <ul>
+        <li><code>email</code>: extracts an address · <code>number</code>: extracts a number (commas allowed) · <code>phone</code>: 7–15 digits · <code>text</code>: any non-empty text.</li>
+      </ul></li>
+    <li>Valid: the value goes to <code>facts.vars[saveAs]</code>, <code>asked[id]</code> is cleared, the run moves on. Invalid: the retry message (custom or a default per format) is sent and it waits again. After 3 tries the run escalates.</li>
+  </ol>
+</section>
+
+<section id="vars">
+  <h2>Variables and Save response</h2>
+  <p class="file">src/runner/context.ts · src/runner/blocks.ts getPath, saveResponse</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Kind</th><th>Declared</th><th>Value stored</th><th>Filled by</th></tr></thead>
+    <tbody>
+      <tr><td>Built-in</td><td>code (<code>VARIABLES</code>)</td><td>not stored; computed in <code>loadRun</code></td><td><code>customer.name</code>, <code>customer.email</code>, <code>today</code></td></tr>
+      <tr><td>Workflow variable</td><td><code>graph.variables</code> (draft and version)</td><td><code>workflow_run.facts.vars</code></td><td>input blocks, Save response</td></tr>
+      <tr><td>AI notes</td><td>—</td><td><code>facts.collected</code></td><td>the AI's <code>collected</code> field</td></tr>
+    </tbody>
+  </table></div>
+  <p><code>loadRun</code> builds the <code>vars</code> map used for <code>{{name}}</code> in every block: built-ins plus every declared variable that has a value. Workflow variables live in their own <code>facts.vars</code> so the AI can't overwrite a customer's answer.</p>
+  <h3>Save response</h3>
+  <p>An AI step can list <code>save: [{ path, var }]</code>. When its action succeeds (in <code>advance</code>, or in <code>apply</code> after an approval), <code>saveResponse()</code> reads each path with <code>getPath()</code> (<code>delivered_at</code>, <code>items[0].name</code>, <code>[0].item</code>, <code>items.length</code>) and stores found values in <code>facts.vars</code>. Missing paths are skipped, and the event <code>response_saved { saved, missing }</code> records both. <code>varsBy[stepId]</code> remembers which variables the step filled, so "ask again" can clear them on a loop back.</p>
+  <p>The editor's field picker calls <code>GET /actions/:key/sample</code>, which returns the newest successful <code>action_run.result</code> for that action. No action is run just to fill the picker.</p>
+</section>
+
+<section id="loops">
+  <h2>Go to step and loops</h2>
+  <p class="file">src/runner/steps.ts rerun, follow</p>
+  <p>Loops are how a workflow says "go back and try again" (for example, "the photo is unclear, ask for another"). Both formats share one bookkeeping function, <code>rerun()</code>:</p>
+  <ul>
+    <li>Counts the visit (<code>facts.visits[key]</code>). Past the limit, the run ends as <code>escalated</code> with reason <code>loop_limit</code>, and the customer is told a teammate will reply.</li>
+    <li>For every block that will run again: its old output moves to <code>previous</code>, and its case, attempts and <code>asked</code> marker are cleared. A <code>since</code> marker is added so the AI sees a note in the transcript at the point the loop happened.</li>
+    <li><b>Ask again</b> (<code>fresh</code>): also forgets the AI's notes and the workflow variables those blocks filled. Without it, the AI keeps what it knows and asks only for what is missing.</li>
+  </ul>
+  <h3>List format: Go to step</h3>
+  <p>A <code>goto</code> node is deterministic (no AI). Forward jumps skip ahead and re-run nothing; backward jumps re-run everything between the target and the goto (<code>between()</code> in document order).</p>
+  <h3>Canvas: loop arrows</h3>
+  <p><code>follow()</code> keeps <code>facts.trail</code>, the list of finished blocks in order. If an arrow leads to a block already on the trail, that arrow is a loop back: it calls <code>rerun()</code> with the arrow's <code>maxVisits</code> and <code>fresh</code>, and cuts the trail back to that block. This works for arrows into the middle of a group too.</p>
+</section>
+
+<section id="messages">
+  <h2>Sending messages</h2>
+  <p class="file">src/runner/steps.ts flush · src/llm/decider.ts compose</p>
+  <p>Nothing is sent to the customer in the middle of a step. Blocks push into <code>workflow_run.outbox</code>, and <code>flush</code> sends everything once per turn, in order:</p>
+  <ul>
+    <li>AI notes in a row (strings) are merged into one reply by <code>compose()</code>, which keeps every fact, amount and date. One note is sent as-is with no LLM call; if merging fails, they are joined.</li>
+    <li>Bubble and input text (<code>{ text, verbatim: true, nodeId }</code>) is sent word for word as its own message.</li>
+  </ul>
+  <p>Each message is a <code>message</code> row with <code>role='bot'</code> and the <code>run_id</code>, plus a <code>message_sent</code> event tagged with the block that wrote it.</p>
+</section>
+
+<section id="waits">
+  <h2>Waiting, reminders, expiry</h2>
+  <p>There is no cron. Every timer is the deadline of the run's <code>DBOS.recv()</code>. When recv times out it returns null, and <code>apply(null)</code> handles the timer.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Waiting for</th><th>Deadline</th><th>On timeout</th></tr></thead>
+    <tbody>
+      <tr><td>Customer (first)</td><td><code>remind_at</code> = now + 120 s</td><td>One reminder: "Just checking in: I still need …"; then wait until <code>expires_at</code></td></tr>
+      <tr><td>Customer (after reminder)</td><td><code>expires_at</code> = now + 600 s</td><td>Run ends <code>expired</code> with a closing message; pending approvals cancelled</td></tr>
+      <tr><td>Approval</td><td><code>due_at</code> = now + 1800 s</td><td>Task <code>expired</code>; run ends <code>escalated</code> ("team needs more time")</td></tr>
+      <tr><td>Paused / failed</td><td>1 hour</td><td>Wakes up and waits again</td></tr>
+    </tbody>
+  </table></div>
+  <p>Because the deadlines are part of the DBOS workflow, they survive restarts: after <code>DBOS.launch()</code> the run resumes its <code>recv</code> with the same deadline.</p>
+</section>
+
+<section id="control">
+  <h2>Signals and run control</h2>
+  <p class="file">src/runner/run-control.ts signal · src/runner/runs.controller.ts · steps.ts apply</p>
+  <p>Every outside event reaches a run through one function, <code>signal(runId, s, idempotencyKey)</code>. It checks the signal is allowed in the run's current status, logs a <code>signal</code> event, and calls <code>DBOS.send('run:&lt;id&gt;', s, 'signal', key)</code>. The key de-duplicates: a customer message uses <code>msg:&lt;messageId&gt;</code>, an approval <code>task:&lt;taskId&gt;</code>.</p>
+  <div class="scroll"><table>
+    <thead><tr><th>Status</th><th>Allowed signals</th></tr></thead>
+    <tbody>
+      <tr><td><code>running</code>, <code>waiting_customer</code></td><td>customer_message, pause, cancel</td></tr>
+      <tr><td><code>waiting_approval</code></td><td>customer_message, approval_decision, pause, cancel</td></tr>
+      <tr><td><code>paused</code></td><td>customer_message, resume, cancel</td></tr>
+      <tr><td><code>failed</code></td><td>customer_message, retry_step, cancel</td></tr>
+    </tbody>
+  </table></div>
+  <ul>
+    <li><b>customer_message</b>: while waiting for the customer, resume at the cursor. While waiting for approval, reply "our team is still reviewing this".</li>
+    <li><b>pause / resume</b>: pause saves <code>paused_from</code> (status and what it was waiting for); resume restores it or continues at the cursor.</li>
+    <li><b>retry_step</b> (only from <code>failed</code>): resets the step's invalid-attempt counter and runs it again.</li>
+    <li><b>cancel</b>: ends the run and cancels its pending approvals.</li>
+  </ul>
+  <p>Team messages (<code>POST /conversations/:id/team-messages</code>) are not signals: they appear in the chat and in the AI's transcript as "Teammate", but they do not wake the run.</p>
+</section>
+
+<div class="part">Tools and people</div>
+
+<section id="actions">
+  <h2>Actions</h2>
+  <p class="file">src/actions/execute.ts · src/actions/actions.controller.ts</p>
+  <p>An action is a row in the <code>action</code> table: key, name, description, JSON input schema, read/write, <code>requires_approval</code>, and a <code>source</code> that says how to run it.</p>
+  <h3>Validating arguments (<code>validateArgs</code>)</h3>
+  <p>Walks the schema's properties: drops empty values, coerces digit strings for <code>integer</code>, stringifies <code>string</code>, then checks <code>required</code>. Returns cleaned args or an error the AI gets to fix on retry.</p>
+  <h3>Running once, exactly (<code>executeAction</code>)</h3>
+  <ol>
+    <li>Idempotency key = <code>&lt;runId&gt;:&lt;stepId&gt;:&lt;visit&gt;</code>. A loop back increases the visit, so a deliberate re-run gets a new key.</li>
+    <li><code>INSERT action_run … ON CONFLICT DO NOTHING</code>. If a row already succeeded, its stored result is returned and nothing runs. A failed row is reset with the new args.</li>
+    <li>In a transaction with <code>SELECT … FOR UPDATE</code>, it dispatches by source: <code>viasocket_flow</code> → <code>runFlow</code>, <code>viasocket</code> → <code>runAppAction</code>, otherwise the mock handler.</li>
+    <li>Success marks the row <code>succeeded</code> with the result; failure marks it <code>failed</code> with the error.</li>
+  </ol>
+  <h3>The built-in and mock actions</h3>
+  <div class="scroll"><table>
+    <thead><tr><th>Action</th><th>Handled by</th><th>Behaviour</th></tr></thead>
+    <tbody>
+      <tr><td><code>escalate_to_human</code></td><td><code>act</code></td><td>Ends the run as <code>escalated</code>; afterwards the bot stays quiet in that conversation</td></tr>
+      <tr><td><code>request_approval</code></td><td><code>act</code></td><td>Opens an <b>evidence</b> task with the chat's attachments and current outputs</td></tr>
+      <tr><td><code>lookup_order</code> (mock, read)</td><td><code>execute.ts</code></td><td>Reads <code>shop_order</code>; checks the email; returns items, totals, delivered date, days since delivery, refundable amount</td></tr>
+      <tr><td><code>refund_order</code> (mock, write, needs approval)</td><td><code>execute.ts</code></td><td>Adds to <code>refunded_minor</code> only if it stays within the total; returns a refund id</td></tr>
+    </tbody>
+  </table></div>
+  <h3>Managing actions</h3>
+  <p><code>PATCH /actions/:key</code> toggles enabled and approval, renames (blocked if any workflow or version uses the key) and edits name/description (which then stop syncing from viaSocket). <code>DELETE</code> removes viaSocket tools only, and only when no workflow uses them.</p>
+</section>
+
+<section id="viasocket">
+  <h2>viaSocket tools</h2>
+  <p class="file">src/integrations/viasocket.ts · integrations.controller.ts · actions.controller.ts from-flow</p>
+  <ol>
+    <li><b>Builder token</b>: <code>GET /integrations/builder-token</code> signs an HS256 JWT with <code>{ org_id, project_id, user_id, unique_identifier }</code> using <code>VIASOCKET_EMBED_SECRET</code>. The web app mounts viaSocket's builder with it.</li>
+    <li><b>Tool created or edited</b>: the builder posts a window message to the web app, which relays it to <code>POST /actions/from-flow</code>. The server checks the webhook URL matches <code>https://flow.sokt.io/func/&lt;id&gt;</code>, builds the input schema from the tool's OpenAI/MCP definition, and inserts or updates an <code>action</code> with <code>source='viasocket_flow'</code>. New tools start as <code>write</code> with <b>approval required</b>, to be safe.</li>
+    <li><b>Tool deleted</b>: deleted outright, or only disabled if a workflow still uses it.</li>
+    <li><b>Running a tool</b>: <code>runFlow(url, args)</code> POSTs the validated args as JSON to the flow URL (60 s timeout). The URL itself is the credential; a status of 400 or above is a failure.</li>
+    <li><b>Legacy app actions</b>: fill the stored input template with <code>{{args.x}}</code>, decrypt the app connection (AES-256-GCM with <code>POC_ENCRYPTION_KEY</code>), and call the viaSocket SDK's <code>runAction</code>.</li>
+  </ol>
+</section>
+
+<section id="approvals">
+  <h2>Approvals</h2>
+  <p class="file">steps.ts openTask, apply · runs.controller.ts</p>
+  <div class="diagram"><pre class="mermaid">
+sequenceDiagram
+  participant AI as AI step
+  participant R as Runner
+  participant DB as approval_task
+  participant T as Teammate
+  AI->>R: call_action refund_order {amount}
+  R->>DB: openTask(kind=action, args, amount, due_at)
+  R-->>AI: status waiting_approval, recv(due_at)
+  T->>DB: POST /approvals/:id/decide {approved}
+  DB->>R: signal approval_decision (key task:id)
+  alt approved action
+    R->>R: executeAction(mode=approved) → outputs, Save response
+  else rejected / evidence
+    R->>R: outputs = {approved, reviewed_by, reviewer_note}
+  end
+  R->>R: follow next block, resume run
+  </pre></div>
+  <ul>
+    <li><b>Evidence</b> tasks (<code>@request_approval</code>) ask a person to review something; the decision lands in <code>outputs</code>, and the next condition reads it ("the team approved the photo").</li>
+    <li><b>Action</b> tasks are opened automatically for any action with <code>requires_approval</code>. The action only runs after approval, in <code>apply()</code>, with mode <code>approved</code>. Until then the bot tells the customer it is waiting for the team, never that it already happened.</li>
+    <li><code>openTask</code> reuses an existing pending task for the same run and step. <code>/decide</code> only updates a task that is still pending, so a double click can't decide twice.</li>
+    <li><code>GET /approvals</code> lists tasks with the customer, the workflow and the attachments resolved for review.</li>
+  </ul>
+</section>
+
+<section id="gtwy">
+  <h2>GTWY (the LLM)</h2>
+  <p class="file">src/llm/gtwy.ts · src/llm/decider.ts</p>
+  <ol>
+    <li><b>Login</b>: the server signs an embed JWT (<code>{ org_id, folder_id, user_id }</code>, HS256 with <code>GTWY_ACCESS_KEY</code>) and posts it to <code>/api/embed/login</code> to get a session token, cached until a minute before it expires.</li>
+    <li><b>One agent</b>: <code>ensureAgent()</code> reads the agent id from <code>app_setting</code>, or creates, configures and publishes one through the GTWY SDK and stores its id.</li>
+    <li><b>Every call</b>: <code>chat(system, user, json)</code> calls GTWY chat completions with that agent and <b>overrides the system prompt per call</b> (<code>configuration.prompt</code>). JSON calls use <code>response_type: json_object</code> and temperature 0. Calls are stateless; the transcript is passed in each time. A 401 retries once with a fresh session.</li>
+  </ol>
+  <div class="scroll"><table>
+    <thead><tr><th>Function</th><th>Used for</th><th>Output</th></tr></thead>
+    <tbody>
+      <tr><td><code>route</code></td><td>Pick a workflow for a new conversation</td><td><code>{ workflow_id, confidence, wants_human, question, reason }</code></td></tr>
+      <tr><td><code>decideStep</code></td><td>Decide an AI step</td><td><code>{ decision, message, collected, missing, action, reason }</code></td></tr>
+      <tr><td><code>chooseCase</code></td><td>Judge AI conditions</td><td><code>{ checks: [{ id, true, why }], reason }</code></td></tr>
+      <tr><td><code>compose</code></td><td>Merge a turn's notes into one reply</td><td>plain text</td></tr>
+      <tr><td><code>freeReply</code></td><td>Answer when no workflow fits</td><td>plain text</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<div class="part">Channels</div>
+
+<section id="playground">
+  <h2>Playground API</h2>
+  <p class="file">src/playground/playground.controller.ts · conversations.ts</p>
+  <ul>
+    <li><code>POST /conversations</code> creates a chat for a customer (defaults to Alex Kim). <code>GET /conversations</code> lists chats with the latest run status, the last line and the count of pending approvals (the red dot).</li>
+    <li><code>GET /conversations/:id</code> is the single poll the screen uses: conversation, all messages (including system), runs with their version's steps and graph, the latest run's events, approvals and action runs.</li>
+    <li><code>POST /conversations/:id/messages</code> posts as the customer (starts or wakes a run). <code>/team-messages</code> posts as a teammate (no wake-up).</li>
+    <li><code>POST /attachments</code> takes base64 (1 byte to 5 MB), stores the file under <code>UPLOADS_DIR</code> with its sha256; <code>GET /attachments/:id</code> streams it back.</li>
+  </ul>
+</section>
+
+<section id="widget">
+  <h2>Chat widget API</h2>
+  <p class="file">src/playground/widget.controller.ts</p>
+  <p>The embeddable chat uses a narrower API under <code>/widget</code> that only touches <code>channel='widget'</code> conversations:</p>
+  <ul>
+    <li><code>POST /widget/conversations { name?, email }</code> requires an email and returns only the id and name.</li>
+    <li><code>GET /widget/conversations/:id</code> returns messages <b>without</b> system rows, plus a <code>typing</code> flag and a <code>waiting_approval</code> flag. No runs, events or approvals are exposed.</li>
+    <li><code>POST /widget/conversations/:id/messages</code> goes through the same <code>postCustomerMessage</code> as the playground.</li>
+  </ul>
+</section>
+
+<section id="observe">
+  <h2>Run panel and observability</h2>
+  <ul>
+    <li><b>Timeline</b>: every meaningful thing is a <code>run_event</code> (run_started, llm_decision, action_called, action_result, case_chosen, goto_jumped, waiting, message_sent, input_received, response_saved, approval_requested, signal, …), with the block id and actor. The run panel draws it directly.</li>
+    <li><b>Steps view</b>: the panel marks a block done if an event names it, highlights the cursor in yellow, shows chosen cases, saved variables and input answers, and strikes through blocks the run can no longer reach (computed client-side from the graph).</li>
+    <li><b>DBOS checkpoints</b>: <code>GET /runs/:id/dbos-steps</code> lists the durable steps DBOS recorded for <code>run:&lt;id&gt;</code> (name, output, error, timing), to see exactly what would be replayed after a restart.</li>
+    <li><b>Tool calls</b>: <code>action_run</code> keeps args, result, error, mode and visit for every call.</li>
+  </ul>
+</section>
+
+<div class="part">Reference</div>
+
+<section id="api">
+  <h2>All endpoints</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Area</th><th>Endpoint</th><th>Purpose</th></tr></thead>
+    <tbody>
+      <tr><td rowspan="9">Workflows</td><td><code>GET /workflows</code>, <code>GET /workflows/:id</code></td><td>List; one with live validation</td></tr>
+      <tr><td><code>GET /workflows/templates</code>, <code>GET /variables</code></td><td>Templates; built-in variables</td></tr>
+      <tr><td><code>POST /workflows</code></td><td>Create (optionally from a template)</td></tr>
+      <tr><td><code>PUT /workflows/:id</code></td><td>Save draft (needs <code>row_version</code>)</td></tr>
+      <tr><td><code>POST /workflows/:id/publish</code></td><td>Freeze a new version and enable</td></tr>
+      <tr><td><code>POST /workflows/:id/canvas</code></td><td>Convert the list to a canvas graph</td></tr>
+      <tr><td><code>PATCH /workflows/:id</code></td><td>Enable or disable</td></tr>
+      <tr><td><code>DELETE /workflows/:id</code></td><td>Archive</td></tr>
+      <tr><td><code>GET /orders</code>, <code>POST /demo/reset-orders</code></td><td>Demo orders; clear refunds</td></tr>
+      <tr><td rowspan="5">Actions</td><td><code>GET /actions</code>, <code>GET /actions/:key</code></td><td>Registry</td></tr>
+      <tr><td><code>GET /actions/:key/sample</code></td><td>Last real response (Save response picker)</td></tr>
+      <tr><td><code>PATCH /actions/:key</code></td><td>Enable, approval, rename, edit details</td></tr>
+      <tr><td><code>DELETE /actions/:key</code></td><td>Remove a viaSocket tool</td></tr>
+      <tr><td><code>POST /actions/from-flow</code></td><td>Sync a viaSocket tool from the builder</td></tr>
+      <tr><td>Integrations</td><td><code>GET /integrations/builder-token</code></td><td>Token for viaSocket's embedded builder</td></tr>
+      <tr><td rowspan="6">Playground</td><td><code>GET/POST /conversations</code></td><td>List; create</td></tr>
+      <tr><td><code>GET /conversations/:id</code></td><td>Everything for the chat screen</td></tr>
+      <tr><td><code>POST /conversations/:id/messages</code></td><td>Customer message</td></tr>
+      <tr><td><code>POST /conversations/:id/team-messages</code></td><td>Teammate message</td></tr>
+      <tr><td><code>POST /attachments</code></td><td>Upload (base64)</td></tr>
+      <tr><td><code>GET /attachments/:id</code></td><td>Download</td></tr>
+      <tr><td rowspan="3">Widget</td><td><code>POST /widget/conversations</code></td><td>Start a widget chat</td></tr>
+      <tr><td><code>GET /widget/conversations/:id</code></td><td>Messages + typing</td></tr>
+      <tr><td><code>POST /widget/conversations/:id/messages</code></td><td>Customer message</td></tr>
+      <tr><td rowspan="4">Runs</td><td><code>POST /runs/:id/pause|resume|cancel|retry</code></td><td>Run control</td></tr>
+      <tr><td><code>GET /runs/:id/dbos-steps</code></td><td>DBOS checkpoints</td></tr>
+      <tr><td><code>GET /approvals?status=</code></td><td>Approval queue</td></tr>
+      <tr><td><code>POST /approvals/:id/decide</code></td><td>Approve or reject</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<section id="flags">
+  <h2>Known gaps</h2>
+  <p>Fine for a POC; worth fixing before anything like this ships.</p>
+  <ul class="flags">
+    <li><span class="sev hi">high</span><b>No authentication</b> on any endpoint, including the public widget API, attachment downloads and approvals.</li>
+    <li><span class="sev hi">high</span><b>viaSocket flow URLs are stored in plain text</b> and act as credentials.</li>
+    <li><span class="sev md">medium</span>Tool HTTP calls run <b>inside a database transaction</b> holding a row lock (up to 60 s for flows).</li>
+    <li><span class="sev md">medium</span>The "wants a human" routing outcome doesn't create an escalated run, so the next message is routed again instead of the bot staying quiet.</li>
+    <li><span class="sev md">medium</span>Run control signals (pause, resume…) use a time-based idempotency key, so a double click sends two signals.</li>
+    <li><span class="sev lo">low</span>Attachment ids on messages aren't checked against the conversation; uploads aren't type-checked.</li>
+    <li><span class="sev lo">low</span>Only decryption exists for <code>app_connection</code>; there is no code path that creates those rows any more.</li>
+    <li><span class="sev lo">low</span>Leftovers: a migration mentions <code>sheet_refund_order</code>; <code>scripts/smoke.js</code> "sheets" mode uses order 5001; stale <code>dist/</code> files from removed modules.</li>
+  </ul>
+</section>
+
+</main>
+</div>

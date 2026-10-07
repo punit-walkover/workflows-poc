@@ -4,12 +4,14 @@ import { useState } from 'react';
 import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, Loader2, Minus } from 'lucide-react';
 import { api, API, money } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
+import { reachableFrom, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
+import { ActionRun, ToolCalls } from './tool-call';
 
 export interface RunView {
-  id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[];
-  facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; visits?: Record<string, number> };
+  id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
+  facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; vars?: Record<string, any>; visits?: Record<string, number> };
   waiting_for: any; end_reason: string | null;
 }
 export interface EventRow { id: string; node_id: string | null; actor: string; type: string; data: any; at: string }
@@ -17,7 +19,8 @@ export interface Task { id: string; run_id: string; status: string; kind: string
 
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
-export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView; events: EventRow[]; approvals: Task[]; onChanged: () => void }) {
+// Approval cards live in the chat timeline only; the header's waiting line says when the run waits on one.
+export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
   const [dbos, setDbos] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
@@ -33,8 +36,11 @@ export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView;
     try { await api(`/runs/${run.id}/${op}`, { method: 'POST', body: { by: 'You (teammate)' } }); onChanged(); } catch (e: any) { setError(e.message); }
   };
   const visited = new Set(events.map((e) => e.node_id).filter(Boolean));
+  // Tool calls per step, oldest first (a loop's repeat is a later visit).
+  const calls = new Map<string, ActionRun[]>();
+  for (const c of [...actionRuns].sort((a, b) => a.visit - b.visit || a.started_at.localeCompare(b.started_at)))
+    if (c.node_id) calls.set(c.node_id, [...(calls.get(c.node_id) ?? []), c]);
   const active = ACTIVE.includes(run.status);
-  const pending = approvals.filter((t) => t.status === 'pending' && t.run_id === run.id);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -56,11 +62,9 @@ export function RunPanel({ run, events, approvals, onChanged }: { run?: RunView;
         {error && <div className="mt-2 text-xs text-bad">{error}</div>}
       </div>
 
-      {pending.map((t) => <ApprovalCard key={t.id} task={t} onDone={onChanged} />)}
-
       <section>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Steps</div>
-        <RunTree list={run.steps} run={run} visited={visited} skipped={false} />
+        {run.graph ? <GraphRun graph={run.graph} run={run} visited={visited} calls={calls} /> : <RunTree list={run.steps} run={run} visited={visited} calls={calls} skipped={false} />}
       </section>
 
       <section>
@@ -97,7 +101,9 @@ function WaitingLine({ run }: { run: RunView }) {
   return <div className="mt-1 flex items-center gap-1 text-xs text-bad"><Clock size={12} /> Waiting for approval · due {at(w.due_at)}</div>;
 }
 
-function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNode[]; run: RunView; visited: Set<unknown>; skipped: boolean; depth?: number }) {
+type Calls = Map<string, ActionRun[]>;
+
+function RunTree({ list, run, visited, calls, skipped, depth = 0 }: { list: WorkflowNode[]; run: RunView; visited: Set<unknown>; calls: Calls; skipped: boolean; depth?: number }) {
   return (
     <div className={depth ? 'ml-4 border-l border-line pl-3' : ''}>
       {list.map((n, i) => {
@@ -125,7 +131,8 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
             <div key={n.id} className={`my-0.5 flex gap-2 py-1 ${box} ${skipped ? 'opacity-40' : ''} ${current ? 'font-medium' : ''}`}>
               <span className="mt-1 shrink-0">{icon}</span>
               <span className="w-4 shrink-0 text-ink-3">{i + 1}.</span>
-              <span className="leading-snug"><InlineText content={n.content} /></span>
+              <span className="min-w-0 leading-snug"><InlineText content={n.content} />
+                {done && <ToolCalls calls={calls.get(n.id) ?? []} output={run.facts.outputs?.[n.id]} />}</span>
             </div>
           );
         }
@@ -143,11 +150,64 @@ function RunTree({ list, run, visited, skipped, depth = 0 }: { list: WorkflowNod
                     <span className="text-ink-2">{c.kind === 'else' ? 'otherwise' : <InlineText content={c.condition} />}</span>
                   </div>
                   {isChosen && <div className="ml-6 text-xs italic text-ok">{chosen.reason}</div>}
-                  <RunTree list={c.steps} run={run} visited={visited} skipped={off} depth={depth + 1} />
+                  <RunTree list={c.steps} run={run} visited={visited} calls={calls} skipped={off} depth={depth + 1} />
                 </div>
               );
             })}
           </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// Canvas runs: groups in reading order (start first), the step the run is on in a yellow box.
+function GraphRun({ graph, run, visited, calls }: { graph: WorkflowGraph; run: RunView; visited: Set<unknown>; calls: Calls }) {
+  const groups = [...graph.groups].sort((a, b) => (a.id === graph.start ? -1 : b.id === graph.start ? 1 : a.x - b.x || a.y - b.y));
+  const live = ACTIVE.includes(run.status);
+  // Skipped: never ran and the run can't get there any more (after it ends, that's everything that never ran).
+  const ahead = reachableFrom(graph, live ? run.current_node_id : null);
+  const skipped = (id: string) => !visited.has(id) && !ahead.has(id);
+  return (
+    <div className="space-y-2">
+      {groups.map((g) => {
+        const off = g.items.length > 0 && g.items.every((it) => skipped(it.id));
+        return (
+        <div key={g.id} className={`rounded-lg border border-line px-2 py-1.5 ${off ? 'border-dashed bg-canvas/40 opacity-60' : ''}`}>
+          <div className="mb-1 flex items-center gap-1.5 text-xs font-semibold text-ink-2">
+            <span className={off ? 'line-through' : ''}>{g.title}</span>
+            {off && <span className="rounded bg-hover px-1 text-[10px] font-medium uppercase tracking-wide text-ink-3">Skipped</span>}
+          </div>
+          {g.items.map((it) => {
+            const current = live && run.current_node_id === it.id;
+            const done = visited.has(it.id) && !current;
+            const skip = skipped(it.id);
+            const icon = current ? (run.status === 'running' ? <Loader2 size={13} className="animate-spin text-action" /> : <Clock size={13} className="text-warn" />)
+              : done ? <Check size={13} className="text-ok" /> : skip ? <Minus size={13} className="text-ink-3" /> : <Circle size={13} className="text-line" />;
+            const chosen = it.type === 'condition' ? it.cases.find((c) => c.id === run.facts.cases?.[it.id]?.case_id) : undefined;
+            return (
+              <div key={it.id} className={`my-0.5 flex gap-2 rounded-md border px-1.5 py-1 ${current ? 'border-warn bg-warn-soft/60 font-medium shadow-sm' : 'border-transparent'}`}>
+                <span className="mt-0.5 shrink-0">{icon}</span>
+                <span className={`min-w-0 leading-snug ${skip ? 'text-ink-3 line-through decoration-ink-3/60' : ''}`}>
+                  {it.type === 'step' ? <><InlineText content={it.content} />
+                      {done && it.save?.map((m) => {
+                        const v = run.facts.vars?.[m.var];
+                        return <span key={m.var} className="block text-xs">
+                          <span className="font-mono text-var">{m.var}</span>{v === undefined ? <span className="text-warn"> ({m.path}: not in response)</span> : <span className="text-ok"> = {typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>}
+                        </span>;
+                      })}
+                      {(done || current) && <ToolCalls calls={calls.get(it.id) ?? []} output={run.facts.outputs?.[it.id]} />}</>
+                    : it.type === 'bubble' ? <span className="text-ink-2">Says: “<InlineText content={it.content} />”</span>
+                    : it.type === 'input' ? <>Asks for <span className="font-mono text-var">{it.saveAs || '…'}</span>
+                        {(run.facts.vars?.[it.saveAs] ?? run.facts.collected?.[it.saveAs]) !== undefined && done && <span className="text-ok"> = {String(run.facts.vars?.[it.saveAs] ?? run.facts.collected[it.saveAs])}</span>}</>
+                    : <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise'
+                        : it.mode === 'rules' ? (chosen.rules ?? []).map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(chosen.join === 'or' ? ' or ' : ' and ')
+                        : <InlineText content={chosen.condition} />}</span>}</>}
+                </span>
+              </div>
+            );
+          })}
+        </div>
         );
       })}
     </div>
@@ -164,7 +224,7 @@ function findNode(list: WorkflowNode[], id: string): WorkflowNode | null {
 
 const LABEL: Record<string, string> = {
   run_started: 'Run started', llm_decision: 'Model decided', case_chosen: 'Branch chosen', action_called: 'Action called',
-  action_result: 'Action result', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
+  action_result: 'Action result', input_received: 'Answer saved', response_saved: 'Response saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
   message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
   run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
   error: 'Error', invalid_action: 'Invalid action',
