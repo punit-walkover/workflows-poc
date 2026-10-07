@@ -12,15 +12,13 @@ interface Row { id: string; name: string; when_to_use: string; enabled: boolean;
 export default function WorkflowsPage() {
   const router = useRouter();
   const [rows, setRows] = useState<Row[]>([]);
-  const [templates, setTemplates] = useState<{ key: string; name: string }[]>([]);
-  const [open, setOpen] = useState(false);
   const [error, setError] = useState('');
 
   const load = () => api<Row[]>('/workflows').then(setRows).catch((e) => setError(e.message));
-  useEffect(() => { load(); api('/workflows/templates').then(setTemplates); }, []);
+  useEffect(() => { load(); }, []);
 
-  const create = async (template?: string) => {
-    const w = await api('/workflows', { method: 'POST', body: { template } });
+  const create = async () => {
+    const w = await api('/workflows', { method: 'POST', body: {} });
     router.push(`/workflows/${w.id}`);
   };
   // Deleting archives it: running conversations finish on their pinned version.
@@ -39,17 +37,7 @@ export default function WorkflowsPage() {
           <h1 className="text-xl font-semibold">Workflows</h1>
           <p className="text-ink-2">Step-by-step playbooks the agent follows for one kind of request.</p>
         </div>
-        <div className="relative">
-          <Button variant="primary" onClick={() => setOpen((o) => !o)}><Plus size={15} /> New workflow</Button>
-          {open && (
-            <div className="absolute right-0 top-10 z-10 w-56 rounded-lg border border-line bg-panel py-1 shadow-lg">
-              <button className="block w-full px-3 py-1.5 text-left hover:bg-hover" onClick={() => create()}>Blank workflow</button>
-              <div className="my-1 border-t border-line" />
-              <div className="px-3 py-1 text-xs text-ink-3">Templates</div>
-              {templates.map((t) => <button key={t.key} className="block w-full px-3 py-1.5 text-left hover:bg-hover" onClick={() => create(t.key)}>{t.name}</button>)}
-            </div>
-          )}
-        </div>
+        <Button variant="primary" onClick={create}><Plus size={15} /> New workflow</Button>
       </div>
       {error && <div className="mb-4 rounded-lg bg-bad-soft px-3 py-2 text-bad">{error}</div>}
       <div className="space-y-3">

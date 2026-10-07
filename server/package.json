@@ -8,8 +8,7 @@
     "start": "node --env-file-if-exists=.env dist/main.js",
     "dev": "nest build && node --env-file-if-exists=.env dist/main.js",
     "db:setup": "node --env-file-if-exists=.env scripts/setup-db.js",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
-    "smoke": "node scripts/smoke.js"
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
     "@dbos-inc/dbos-sdk": "^5.2.11",

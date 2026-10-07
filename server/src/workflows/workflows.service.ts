@@ -2,7 +2,6 @@ import { ConflictException, NotFoundException, BadRequestException } from '@nest
 import { one, q, tx } from '../db';
 import { WorkflowGraph, WorkflowNode } from '../types';
 import { treeToGraph, validateGraph } from './graph';
-import { TEMPLATES } from './templates';
 import { validateWorkflow } from './validator';
 
 // A workflow is either a list tree (`steps`) or, once opened in the canvas, a graph (`graph`).
@@ -26,16 +25,15 @@ export async function getWorkflow(id: string) {
   return { ...w, validation: check(w, await enabledActionKeys()) };
 }
 
-export async function createWorkflow(body: { template?: string; name?: string }) {
-  const tpl = TEMPLATES.find((t) => t.key === body.template);
-  const base = body.name?.trim() || tpl?.name || 'Untitled workflow';
+export async function createWorkflow(body: { name?: string }) {
+  const base = body.name?.trim() || 'Untitled workflow';
   const taken = await q<{ name: string }>('select name from workflow where name like $1 and archived_at is null', [`${base}%`]);
   const name = taken.some((r) => r.name === base) ? `${base} ${taken.length + 1}` : base;
-  const steps: WorkflowNode[] = tpl?.steps ?? [{ id: rid(), type: 'step', content: [] }];
+  const steps: WorkflowNode[] = [{ id: rid(), type: 'step', content: [] }];
   const v = validateWorkflow(steps, await enabledActionKeys());
-  const row = await one(`insert into workflow (name, when_to_use, steps, action_keys, step_count, template)
-                         values ($1, $2, $3, $4, $5, $6) returning id`,
-    [name, tpl?.when_to_use ?? '', JSON.stringify(steps), v.action_keys, v.step_count, tpl?.key ?? null]);
+  const row = await one(`insert into workflow (name, when_to_use, steps, action_keys, step_count)
+                         values ($1, '', $2, $3, $4) returning id`,
+    [name, JSON.stringify(steps), v.action_keys, v.step_count]);
   return getWorkflow(row.id);
 }
 
@@ -86,15 +84,6 @@ export async function patchWorkflow(id: string, body: { enabled?: boolean }) {
 export async function archiveWorkflow(id: string) {
   await q('update workflow set archived_at = now(), enabled = false where id = $1', [id]);
   return { ok: true };
-}
-
-// Demo data: publish both templates on first boot.
-export async function seedWorkflows() {
-  if (await one('select 1 from workflow limit 1')) return;
-  for (const tpl of TEMPLATES) {
-    const w = await createWorkflow({ template: tpl.key });
-    await publishWorkflow(w.id);
-  }
 }
 
 export function rid(): string {

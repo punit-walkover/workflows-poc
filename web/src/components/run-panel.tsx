@@ -19,7 +19,8 @@ export interface Task { id: string; run_id: string; status: string; kind: string
 
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
-export function RunPanel({ run, events, approvals, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; approvals: Task[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
+// Approval cards live in the chat timeline only; the header's waiting line says when the run waits on one.
+export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
   const [dbos, setDbos] = useState<any[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
@@ -40,7 +41,6 @@ export function RunPanel({ run, events, approvals, actionRuns = [], onChanged }:
   for (const c of [...actionRuns].sort((a, b) => a.visit - b.visit || a.started_at.localeCompare(b.started_at)))
     if (c.node_id) calls.set(c.node_id, [...(calls.get(c.node_id) ?? []), c]);
   const active = ACTIVE.includes(run.status);
-  const pending = approvals.filter((t) => t.status === 'pending' && t.run_id === run.id);
 
   return (
     <div className="flex flex-col gap-4 p-4">
@@ -61,8 +61,6 @@ export function RunPanel({ run, events, approvals, actionRuns = [], onChanged }:
         )}
         {error && <div className="mt-2 text-xs text-bad">{error}</div>}
       </div>
-
-      {pending.map((t) => <ApprovalCard key={t.id} task={t} onDone={onChanged} />)}
 
       <section>
         <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Steps</div>

@@ -7,11 +7,11 @@ import { Button, Card, Toggle } from '@/components/ui';
 import { ToolDialog, type Tool } from '@/components/viasocket-panel';
 
 interface Action {
-  key: string; name: string; description: string; kind: string; source: 'builtin' | 'mock' | 'viasocket' | 'viasocket_flow';
+  key: string; name: string; description: string; kind: string; source: 'builtin' | 'viasocket' | 'viasocket_flow';
   requires_approval: boolean; enabled: boolean; via_flow_id: string | null;
 }
 
-const SOURCE: Record<string, string> = { builtin: 'built-in', mock: 'mock shop', viasocket: 'viaSocket app action', viasocket_flow: 'viaSocket' };
+const SOURCE: Record<string, string> = { builtin: 'built-in', viasocket: 'viaSocket app action', viasocket_flow: 'viaSocket' };
 
 // Tools are created in the tool dialog: viaSocket's builder plus our details. Each published tool becomes an @action here.
 export default function ActionsPage() {
