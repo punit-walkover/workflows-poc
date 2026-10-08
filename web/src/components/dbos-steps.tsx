@@ -54,7 +54,7 @@ function summarize(s: DbosStep): { text: string; node?: string } {
 
 // DBOS's own checkpoint log, readable: one row per durable step, raw output on click.
 // A wait (recv) starts a new turn, so it gets a divider: that's where the run was asleep.
-export function DbosSteps({ steps }: { steps: DbosStep[] }) {
+export function DbosSteps({ steps, labels }: { steps: DbosStep[]; labels?: Map<string, string> }) {
   const [open, setOpen] = useState<number | null>(null);
   if (!steps.length) return <div className="mb-3 rounded-lg border border-line px-3 py-2 text-xs text-ink-3">No checkpoints yet.</div>;
   return (
@@ -72,7 +72,7 @@ export function DbosSteps({ steps }: { steps: DbosStep[] }) {
               <span className={`flex min-w-0 items-center gap-1.5 ${s.error ? 'text-bad' : 'text-ink'}`}>
                 <ChevronRight size={11} className={`shrink-0 text-ink-3 transition-transform ${open === s.function_id ? 'rotate-90' : ''}`} />
                 <span className="truncate">{text}</span>
-                {node && <span className="shrink-0 rounded bg-canvas px-1 font-mono text-[10px] text-ink-3">{node}</span>}
+                {node && <span title={node} className="max-w-[45%] shrink-0 truncate rounded bg-canvas px-1 text-[10px] text-ink-3">{labels?.get(node) ?? node}</span>}
               </span>
               <span className="text-[10px] text-ink-3">{ms === null ? '' : ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(1)} s`}</span>
             </button>
