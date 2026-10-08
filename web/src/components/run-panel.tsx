@@ -8,6 +8,7 @@ import { reachableFrom, ruleText, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
 import { ActionRun, ToolCalls } from './tool-call';
+import { DbosStep, DbosSteps } from './dbos-steps';
 import { JsonView } from './json-view';
 import { ChevronRight } from 'lucide-react';
 
@@ -23,7 +24,7 @@ const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'fa
 
 // Approval cards live in the chat timeline only; the header's waiting line says when the run waits on one.
 export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
-  const [dbos, setDbos] = useState<any[] | null>(null);
+  const [dbos, setDbos] = useState<DbosStep[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
     return (
@@ -77,17 +78,7 @@ export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: Ru
             <Database size={12} /> {dbos ? 'Hide' : 'Show'} DBOS checkpoints
           </button>
         </div>
-        {dbos && (
-          <div className="mb-3 rounded-lg border border-line bg-canvas p-2 font-mono text-[11px]">
-            {dbos.map((s) => (
-              <div key={s.function_id} className="flex gap-2">
-                <span className="w-6 text-right text-ink-3">{s.function_id}</span>
-                <span className="w-16">{s.name}</span>
-                <span className="truncate text-ink-2">{s.error ? `error: ${s.error}` : JSON.stringify(s.output)}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {dbos && <DbosSteps steps={dbos} />}
         <Timeline events={events} />
       </section>
     </div>
