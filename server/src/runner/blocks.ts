@@ -22,7 +22,7 @@ export function checkAnswer(format: InputFormat, raw: string): { ok: true; value
 }
 
 export const RETRY: Record<InputFormat, string> = {
-  text: 'Could you type your answer?',
+  text: "Sorry, I didn't get that. Could you answer the question above?",
   email: "That doesn't look like an email address. Could you check it?",
   number: 'Could you send that as a number?',
   phone: "That doesn't look like a phone number. Could you check it?",

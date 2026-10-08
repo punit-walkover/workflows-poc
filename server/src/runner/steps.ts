@@ -44,6 +44,11 @@ export async function decide(runId: string): Promise<Decision> {
     const asked = ctx.run.facts.asked?.[nodeId];
     const reply = asked && [...ctx.messages].reverse().find((m) => m.role === 'customer' && !!m.created_at && new Date(m.created_at).toISOString() > asked);
     if (!reply) return { kind: 'ask', nodeId, answer: null, invalid: false };
+    // The topic check already found this reply isn't an answer ("hmm I don't know"): ask again instead of saving it.
+    if (ctx.run.facts.notAnswer?.[nodeId]) {
+      await addEvent(runId, nodeId, 'system', 'input_invalid', { [node.saveAs]: reply.text, reason: 'not an answer to the question' });
+      return { kind: 'ask', nodeId, answer: null, invalid: true };
+    }
     const v = checkAnswer(node.format, reply.text ?? '');
     await addEvent(runId, nodeId, 'system', v.ok ? 'input_received' : 'input_invalid', { [node.saveAs]: v.ok ? v.value : reply.text, format: node.format });
     return { kind: 'ask', nodeId, answer: v.ok ? { value: v.value } : null, invalid: !v.ok };
@@ -196,6 +201,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
       delete r.facts.asked?.[dec.nodeId]; // answer used: a later visit asks again
       return moveOn(dec.nodeId);
     }
+    delete r.facts.notAnswer?.[dec.nodeId];
     r.facts.attempts[dec.nodeId] = (r.facts.attempts[dec.nodeId] ?? 0) + 1;
     if (r.facts.attempts[dec.nodeId] > 3) {
       r.outbox.push('I am handing this to a teammate who will reply shortly.');

@@ -236,7 +236,7 @@ const LABEL: Record<string, string> = {
   action_result: 'Action result', input_received: 'Answer saved', response_saved: 'Response saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
   message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
   run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
-  error: 'Error', invalid_action: 'Invalid action',
+  error: 'Error', invalid_action: 'Invalid action', topic_checked: 'Topic checked',
 };
 
 function summary(e: EventRow): string {
@@ -252,6 +252,7 @@ function summary(e: EventRow): string {
     case 'approval_requested': return d.summary;
     case 'waiting': return d.for === 'customer' ? `customer: ${(d.expects ?? []).join(', ')}` : 'approval';
     case 'message_sent': return d.text;
+    case 'topic_checked': return `${String(d.kind).replace('_', ' ')} (${Number(d.confidence ?? 0).toFixed(2)}) — ${d.reason}`;
     case 'signal': case 'signal_applied': return `${d.type}${d.approved !== undefined ? (d.approved ? ' ✓ approved' : ' ✗ rejected') : ''}${d.note ? ` — "${d.note}"` : ''}`;
     default: return d.reason || d.error || '';
   }
