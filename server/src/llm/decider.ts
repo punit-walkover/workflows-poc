@@ -123,3 +123,29 @@ export async function freeReply(messages: Transcript[]): Promise<string> {
   );
   return r.content.trim();
 }
+
+const TOPIC_SYSTEM = `A support workflow is waiting for the customer to answer a question. Decide what the customer's new message is. Answer with ONE JSON object only:
+{"kind":"answer|new_request|neither","workflow_id":"<id or null>","confidence":0.0,"reason":"one short sentence"}.
+- answer: the message replies to the pending question (even partly, or with extra words around the answer).
+- new_request: the message does not answer the question and instead asks for something one of the OTHER workflows handles; set workflow_id to that workflow.
+- neither: not an answer and no other workflow fits (small talk, "I don't know", a question back).
+- confidence: 0 to 1 for your choice. Prefer "answer" when unsure: switching away loses the customer's progress.`;
+
+export interface TopicCheck { kind: 'answer' | 'new_request' | 'neither'; workflow_id: string | null; confidence: number; reason: string }
+
+// Topic check: while a run waits on the customer, did they answer, or change the subject to another workflow?
+export async function checkTopic(input: {
+  current: string; question: string; reply: string;
+  workflows: { id: string; name: string; when_to_use: string }[]; messages: Transcript[];
+}): Promise<TopicCheck> {
+  if (!input.workflows.length) return { kind: 'answer', workflow_id: null, confidence: 1, reason: 'no other workflows' };
+  const list = input.workflows.map((w) => `- id ${w.id}: ${w.name}. When to use: ${w.when_to_use}`).join('\n');
+  const r = await chat(TOPIC_SYSTEM,
+    `Current workflow: ${input.current}\nPending question from the bot: ${input.question || '(none)'}\nCustomer's new message: ${input.reply}\n` +
+    `Other workflows:\n${list}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`, true);
+  const d = parseJson<TopicCheck>(r.content);
+  const known = input.workflows.some((w) => w.id === d.workflow_id);
+  const kind = (['answer', 'new_request', 'neither'] as const).includes(d.kind) ? d.kind : 'answer';
+  return { kind: kind === 'new_request' && !known ? 'neither' : kind, workflow_id: known ? d.workflow_id : null,
+           confidence: Number(d.confidence) || 0, reason: d.reason || '' };
+}

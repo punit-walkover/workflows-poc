@@ -172,11 +172,9 @@ function Item({ group, item, index }: { group: GraphGroup; item: GraphItem; inde
         Save answer in
         <VarSelect value={item.saveAs} set={(g, v) => setInput(g, item.id, { saveAs: v })} />
       </div>
-      {item.format !== 'text' && (
-        <input value={item.retry ?? ''} disabled={c.readOnly} placeholder="If the answer doesn't fit, say… (optional)"
-               onChange={(e) => c.update((g) => setInput(g, item.id, { retry: e.target.value || undefined }))}
-               className="mt-1 w-full rounded border border-line bg-panel px-1.5 py-0.5 text-xs outline-none placeholder:text-ink-3" />
-      )}
+      <input value={item.retry ?? ''} disabled={c.readOnly} placeholder="If the answer doesn't fit, say… (optional)"
+             onChange={(e) => c.update((g) => setInput(g, item.id, { retry: e.target.value || undefined }))}
+             className="mt-1 w-full rounded border border-line bg-panel px-1.5 py-0.5 text-xs outline-none placeholder:text-ink-3" />
     </div>
   );
 
