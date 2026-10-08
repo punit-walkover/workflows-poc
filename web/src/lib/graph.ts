@@ -7,7 +7,9 @@ export const RULE_OPS = [
   { op: '>', label: '>' }, { op: '<', label: '<' }, { op: 'empty', label: 'is empty' }, { op: 'not_empty', label: 'is set' },
 ] as const;
 export type RuleOp = (typeof RULE_OPS)[number]['op'];
-export interface Rule { var: string; op: RuleOp; value: string }
+// ref: compare with another variable's value instead of the typed value.
+export interface Rule { var: string; op: RuleOp; value: string; ref?: string }
+export const ruleText = (r: Rule) => `${r.var} ${r.op} ${r.ref ? `{{${r.ref}}}` : r.value}`.trim();
 export const INPUT_FORMATS = [
   { format: 'text', label: 'Text' }, { format: 'email', label: 'Email' }, { format: 'number', label: 'Number' }, { format: 'phone', label: 'Phone' },
 ] as const;

@@ -94,7 +94,7 @@ export function graphMentions(g: WorkflowGraph) {
   for (const it of allItems(g)) {
     if (it.type === 'step' || it.type === 'bubble') { scan(it.content); if (it.type === 'step') it.save?.forEach((m) => vars.add(m.var)); }
     else if (it.type === 'input') { scan(it.prompt); vars.add(it.saveAs); }
-    else it.cases.forEach((c) => { scan(c.condition); c.rules?.forEach((r) => vars.add(r.var)); });
+    else it.cases.forEach((c) => { scan(c.condition); c.rules?.forEach((r) => { vars.add(r.var); if (r.ref) vars.add(r.ref); }); });
   }
   return { actions: [...actions], vars: [...vars] };
 }
@@ -161,6 +161,7 @@ export function validateGraph(g: unknown, enabledActions: string[]) {
             if (!c.rules?.length) issues.push(`"${grp.title}": add a rule to each case`);
             c.rules?.forEach((r) => {
               if (!r.var) issues.push(`"${grp.title}": a rule has no variable`);
+              if (r.ref === '') issues.push(`"${grp.title}": choose the variable to compare with`);
               if (!RULE_OPS.includes(r.op)) issues.push(`"${grp.title}": a rule has an unknown comparison`);
             });
           }

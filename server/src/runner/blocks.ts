@@ -32,7 +32,8 @@ export const RETRY: Record<InputFormat, string> = {
 function test(r: Rule, values: Record<string, unknown>): boolean {
   const v = values[r.var];
   const left = v === undefined || v === null ? '' : String(v).trim();
-  const right = r.value.trim();
+  const other = r.ref ? values[r.ref] : r.value;
+  const right = other === undefined || other === null ? '' : String(other).trim();
   switch (r.op) {
     case 'empty': return left === '';
     case 'not_empty': return left !== '';
@@ -50,7 +51,7 @@ export function chooseByRules(b: BranchNode, values: Record<string, unknown>): {
     if (c.kind === 'else') return { case_id: c.id, reason: 'no rule matched' };
     const rules = c.rules ?? [];
     const hit = rules.length > 0 && (c.join === 'or' ? rules.some((r) => test(r, values)) : rules.every((r) => test(r, values)));
-    if (hit) return { case_id: c.id, reason: rules.map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(c.join === 'or' ? ' or ' : ' and ') };
+    if (hit) return { case_id: c.id, reason: rules.map((r) => `${r.var} ${r.op} ${r.ref ? `{{${r.ref}}}` : r.value}`.trim()).join(c.join === 'or' ? ' or ' : ' and ') };
   }
   return { case_id: null, reason: 'no rule matched' };
 }
