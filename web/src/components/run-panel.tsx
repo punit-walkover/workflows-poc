@@ -4,10 +4,12 @@ import { useState } from 'react';
 import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, Loader2, Minus } from 'lucide-react';
 import { api, API, money } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
-import { reachableFrom, type WorkflowGraph } from '@/lib/graph';
+import { reachableFrom, ruleText, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
 import { ActionRun, ToolCalls } from './tool-call';
+import { JsonView } from './json-view';
+import { ChevronRight } from 'lucide-react';
 
 export interface RunView {
   id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
@@ -190,18 +192,13 @@ function GraphRun({ graph, run, visited, calls }: { graph: WorkflowGraph; run: R
                 <span className="mt-0.5 shrink-0">{icon}</span>
                 <span className={`min-w-0 leading-snug ${skip ? 'text-ink-3 line-through decoration-ink-3/60' : ''}`}>
                   {it.type === 'step' ? <><InlineText content={it.content} />
-                      {done && it.save?.map((m) => {
-                        const v = run.facts.vars?.[m.var];
-                        return <span key={m.var} className="block text-xs">
-                          <span className="font-mono text-var">{m.var}</span>{v === undefined ? <span className="text-warn"> ({m.path}: not in response)</span> : <span className="text-ok"> = {typeof v === 'object' ? JSON.stringify(v) : String(v)}</span>}
-                        </span>;
-                      })}
+                      {done && it.save?.map((m) => <SavedVar key={m.var} name={m.var} path={m.path} value={run.facts.vars?.[m.var]} />)}
                       {(done || current) && <ToolCalls calls={calls.get(it.id) ?? []} output={run.facts.outputs?.[it.id]} />}</>
                     : it.type === 'bubble' ? <span className="text-ink-2">Says: “<InlineText content={it.content} />”</span>
                     : it.type === 'input' ? <>Asks for <span className="font-mono text-var">{it.saveAs || '…'}</span>
                         {(run.facts.vars?.[it.saveAs] ?? run.facts.collected?.[it.saveAs]) !== undefined && done && <span className="text-ok"> = {String(run.facts.vars?.[it.saveAs] ?? run.facts.collected[it.saveAs])}</span>}</>
                     : <>Condition{chosen && <span className="text-ok"> → {chosen.kind === 'else' ? 'otherwise'
-                        : it.mode === 'rules' ? (chosen.rules ?? []).map((r) => `${r.var} ${r.op} ${r.value}`.trim()).join(chosen.join === 'or' ? ' or ' : ' and ')
+                        : it.mode === 'rules' ? (chosen.rules ?? []).map(ruleText).join(chosen.join === 'or' ? ' or ' : ' and ')
                         : <InlineText content={chosen.condition} />}</span>}</>}
                 </span>
               </div>
@@ -211,6 +208,27 @@ function GraphRun({ graph, run, visited, calls }: { graph: WorkflowGraph; run: R
         );
       })}
     </div>
+  );
+}
+
+// A variable filled by Save response: plain values inline; objects and lists fold (closed by default) into a JSON tree.
+function SavedVar({ name, path, value: raw }: { name: string; path: string; value: unknown }) {
+  const [open, setOpen] = useState(false);
+  // Some tools return JSON as text; show it as a tree too.
+  let value = raw;
+  if (typeof raw === 'string' && /^\s*[[{]/.test(raw)) { try { value = JSON.parse(raw); } catch { /* plain text */ } }
+  const label = <span className="font-mono text-var">{name}</span>;
+  if (value === undefined) return <span className="block text-xs">{label}<span className="text-warn"> ({path}: not in response)</span></span>;
+  if (value === null || typeof value !== 'object') return <span className="block text-xs">{label}<span className="text-ok"> = {String(value)}</span></span>;
+  const n = Array.isArray(value) ? value.length : Object.keys(value).length;
+  return (
+    <span className="block text-xs font-normal">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex items-center gap-1 hover:text-ink">
+        <ChevronRight size={12} className={`shrink-0 text-ink-3 transition-transform ${open ? 'rotate-90' : ''}`} />
+        {label}<span className="text-ink-3"> = {Array.isArray(value) ? `[ ${n} item${n === 1 ? '' : 's'} ]` : `{ ${n} field${n === 1 ? '' : 's'} }`}</span>
+      </button>
+      {open && <span className="mt-1 block max-h-60 overflow-auto rounded-md border border-line bg-canvas/60 p-2"><JsonView value={value} /></span>}
+    </span>
   );
 }
 

@@ -14,7 +14,8 @@ export type WorkflowNode = StepNode | BranchNode | GotoNode;
 
 // A rule compares a variable with a value, without AI.
 export const RULE_OPS = ['=', '!=', 'contains', '>', '<', 'empty', 'not_empty'] as const;
-export interface Rule { var: string; op: (typeof RULE_OPS)[number]; value: string }
+// ref: compare with another variable's value instead of the typed value.
+export interface Rule { var: string; op: (typeof RULE_OPS)[number]; value: string; ref?: string }
 export const INPUT_FORMATS = ['text', 'email', 'number', 'phone'] as const;
 export type InputFormat = (typeof INPUT_FORMATS)[number];
 

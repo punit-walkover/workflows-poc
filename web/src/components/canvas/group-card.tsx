@@ -244,8 +244,19 @@ function Rules({ itemId, cs }: { itemId: string; cs: GraphCase }) {
               {RULE_OPS.map((o) => <option key={o.op} value={o.op}>{o.label}</option>)}
             </select>
             {r.op !== 'empty' && r.op !== 'not_empty' && (
-              <input value={r.value} disabled={c.readOnly} placeholder="value" onChange={(e) => c.update((g) => put(g, i, { value: e.target.value }))}
-                     className="w-full min-w-0 rounded border border-line bg-panel px-1.5 py-0.5 outline-none" />
+              <div className="flex w-full min-w-0 items-center gap-1">
+                {r.ref !== undefined
+                  ? <VarSelect value={r.ref} builtins set={(g, v) => put(g, i, { ref: v })} />
+                  : <input value={r.value} disabled={c.readOnly} placeholder="value" onChange={(e) => c.update((g) => put(g, i, { value: e.target.value }))}
+                           className="w-full min-w-0 rounded border border-line bg-panel px-1.5 py-0.5 outline-none" />}
+                {!c.readOnly && (
+                  <button title={r.ref !== undefined ? 'Compare with typed text' : 'Compare with another variable'}
+                          onClick={() => c.update((g) => put(g, i, r.ref !== undefined ? { ref: undefined } : { ref: '' }))}
+                          className={`shrink-0 rounded border px-1 py-0.5 font-mono text-[10px] ${r.ref !== undefined ? 'border-var/40 bg-var-soft text-var' : 'border-line text-ink-3 hover:text-ink'}`}>
+                    {r.ref !== undefined ? '{x}' : 'abc'}
+                  </button>
+                )}
+              </div>
             )}
             {!c.readOnly && list.length > 1 && (
               <button title="Remove rule" onClick={() => c.update((g) => setCase(g, itemId, cs.id, { rules: list.filter((_, j) => j !== i) }))}
