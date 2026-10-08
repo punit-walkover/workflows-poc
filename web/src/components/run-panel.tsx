@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, Loader2, Minus } from 'lucide-react';
+import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, History, ListChecks, Loader2, Minus } from 'lucide-react';
 import { api, API, money } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
 import { reachableFrom, ruleText, type WorkflowGraph } from '@/lib/graph';
@@ -9,21 +9,24 @@ import { Button, StatusChip } from './ui';
 import { InlineText } from './inline-text';
 import { ActionRun, ToolCalls } from './tool-call';
 import { DbosStep, DbosSteps } from './dbos-steps';
+import { nodeLabels, RunTimeline, TimelineMessage } from './run-timeline';
 import { JsonView } from './json-view';
 import { ChevronRight } from 'lucide-react';
 
 export interface RunView {
   id: string; status: string; current_node_id: string | null; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null;
   facts: { cases: Record<string, { case_id: string | null; reason: string }>; outputs: Record<string, any>; collected: Record<string, any>; vars?: Record<string, any>; visits?: Record<string, number> };
-  waiting_for: any; end_reason: string | null;
+  waiting_for: any; end_reason: string | null; started_at?: string;
 }
-export interface EventRow { id: string; node_id: string | null; actor: string; type: string; data: any; at: string }
+export interface EventRow { id: string; run_id: string; node_id: string | null; actor: string; type: string; data: any; at: string }
 export interface Task { id: string; run_id: string; status: string; kind: string; summary: string; amount_minor: number | null; evidence: any; decided_by: string | null; decision_note: string | null; created_at: string; decided_at: string | null }
 
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
 // Approval cards live in the chat timeline only; the header's waiting line says when the run waits on one.
-export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: RunView; events: EventRow[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
+// Steps show the current run (runs[0]); the timeline covers every run of the chat (e.g. before and after a topic switch).
+export function RunPanel({ runs, events, messages, actionRuns = [], onChanged }: { runs: RunView[]; events: EventRow[]; messages?: TimelineMessage[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
+  const run = runs[0];
   const [dbos, setDbos] = useState<DbosStep[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
@@ -38,7 +41,7 @@ export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: Ru
     setError('');
     try { await api(`/runs/${run.id}/${op}`, { method: 'POST', body: { by: 'You (teammate)' } }); onChanged(); } catch (e: any) { setError(e.message); }
   };
-  const visited = new Set(events.map((e) => e.node_id).filter(Boolean));
+  const visited = new Set(events.filter((e) => e.run_id === run.id).map((e) => e.node_id).filter(Boolean));
   // Tool calls per step, oldest first (a loop's repeat is a later visit).
   const calls = new Map<string, ActionRun[]>();
   for (const c of [...actionRuns].sort((a, b) => a.visit - b.visit || a.started_at.localeCompare(b.started_at)))
@@ -66,21 +69,31 @@ export function RunPanel({ run, events, actionRuns = [], onChanged }: { run?: Ru
       </div>
 
       <section>
-        <div className="mb-2 text-xs font-medium uppercase tracking-wide text-ink-3">Steps</div>
+        <SectionHeader icon={ListChecks} title="Steps" />
         {run.graph ? <GraphRun graph={run.graph} run={run} visited={visited} calls={calls} /> : <RunTree list={run.steps} run={run} visited={visited} calls={calls} skipped={false} />}
       </section>
 
-      <section>
-        <div className="mb-2 flex items-center justify-between">
-          <span className="text-xs font-medium uppercase tracking-wide text-ink-3">Timeline</span>
-          <button className="flex items-center gap-1 text-xs text-ink-2 hover:text-ink"
+      <section className="border-t border-line pt-4">
+        <SectionHeader icon={History} title="Timeline">
+          <button title="DBOS checkpoints" className={`flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] ${dbos ? 'border-ink bg-ink text-white' : 'border-line bg-panel text-ink-2 hover:text-ink'}`}
                   onClick={async () => setDbos(dbos ? null : await api(`/runs/${run.id}/dbos-steps`))}>
-            <Database size={12} /> {dbos ? 'Hide' : 'Show'} DBOS checkpoints
+            <Database size={11} /> DBOS
           </button>
-        </div>
-        {dbos && <DbosSteps steps={dbos} />}
-        <Timeline events={events} />
+        </SectionHeader>
+        {dbos && <DbosSteps steps={dbos} labels={nodeLabels(run)} />}
+        <RunTimeline runs={runs} events={events} messages={messages} />
       </section>
+    </div>
+  );
+}
+
+// A highlighted section heading for the panel (Steps, Timeline), with optional controls on the right.
+function SectionHeader({ icon: Icon, title, children }: { icon: typeof Check; title: string; children?: React.ReactNode }) {
+  return (
+    <div className="mb-2 flex items-center gap-2 rounded-lg border border-line bg-hover px-2.5 py-1.5">
+      <Icon size={14} className="shrink-0 text-ink" />
+      <span className="text-xs font-semibold uppercase tracking-wide text-ink">{title}</span>
+      {children && <span className="ml-auto flex items-center gap-1.5">{children}</span>}
     </div>
   );
 }
@@ -229,53 +242,6 @@ function findNode(list: WorkflowNode[], id: string): WorkflowNode | null {
     if (n.type === 'branch') for (const c of n.cases) { const f = findNode(c.steps, id); if (f) return f; }
   }
   return null;
-}
-
-const LABEL: Record<string, string> = {
-  run_started: 'Run started', llm_decision: 'Model decided', case_chosen: 'Branch chosen', action_called: 'Action called',
-  action_result: 'Action result', input_received: 'Answer saved', response_saved: 'Response saved', input_invalid: 'Answer did not fit', goto_jumped: 'Jumped', goto_limit: 'Repeat limit hit', approval_requested: 'Approval requested', waiting: 'Waiting',
-  message_sent: 'Message sent', signal: 'Signal received', signal_applied: 'Signal applied', reminder_sent: 'Reminder sent',
-  run_completed: 'Run completed', run_escalated: 'Escalated', run_failed: 'Failed', run_expired: 'Expired', run_cancelled: 'Cancelled',
-  error: 'Error', invalid_action: 'Invalid action', topic_checked: 'Topic checked',
-};
-
-function summary(e: EventRow): string {
-  const d = e.data ?? {};
-  switch (e.type) {
-    case 'run_started': return `${d.workflow} v${d.version} — ${d.reason}`;
-    case 'llm_decision': return `${d.decision}${d.action?.key ? ` ${d.action.key}` : ''} — ${d.reason || ''}`;
-    case 'case_chosen': return `${d.case_id} — ${d.reason}`;
-    case 'action_called': return `${d.key}(${JSON.stringify(d.args)})`;
-    case 'action_result': return d.ok ? JSON.stringify(d.result).slice(0, 140) : `failed: ${d.error}`;
-    case 'goto_jumped': return `${d.direction === 'forward' ? 'ahead' : 'back'} to ${d.target} · visit ${d.visit} of ${d.max_visits}`;
-    case 'goto_limit': return `${d.target} already ran ${d.max_visits}× · handed to a person`;
-    case 'approval_requested': return d.summary;
-    case 'waiting': return d.for === 'customer' ? `customer: ${(d.expects ?? []).join(', ')}` : 'approval';
-    case 'message_sent': return d.text;
-    case 'topic_checked': return `${String(d.kind).replace('_', ' ')} (${Number(d.confidence ?? 0).toFixed(2)}) — ${d.reason}`;
-    case 'signal': case 'signal_applied': return `${d.type}${d.approved !== undefined ? (d.approved ? ' ✓ approved' : ' ✗ rejected') : ''}${d.note ? ` — "${d.note}"` : ''}`;
-    default: return d.reason || d.error || '';
-  }
-}
-
-function Timeline({ events }: { events: EventRow[] }) {
-  const [open, setOpen] = useState<string | null>(null);
-  return (
-    <div className="space-y-1">
-      {events.filter((e) => e.type !== 'signal_applied').map((e) => (
-        <button key={e.id} onClick={() => setOpen(open === e.id ? null : e.id)} className="block w-full rounded-md px-2 py-1 text-left hover:bg-hover">
-          <div className="flex items-baseline gap-2 text-xs">
-            <span className="w-14 shrink-0 text-ink-3">{new Date(e.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-            <span className="font-medium">{LABEL[e.type] ?? e.type}</span>
-            {e.node_id && <span className="text-ink-3">{e.node_id}</span>}
-            <span className="ml-auto shrink-0 text-ink-3">{e.actor}</span>
-          </div>
-          <div className="ml-16 line-clamp-2 text-xs text-ink-2">{summary(e)}</div>
-          {open === e.id && <pre className="ml-16 mt-1 overflow-auto rounded bg-canvas p-2 text-[11px]">{JSON.stringify(e.data, null, 2)}</pre>}
-        </button>
-      ))}
-    </div>
-  );
 }
 
 export function ApprovalCard({ task, onDone, showContext }: { task: Task & { customer_name?: string; workflow_name?: string; attachments?: any[] }; onDone: () => void; showContext?: boolean }) {

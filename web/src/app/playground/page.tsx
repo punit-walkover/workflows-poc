@@ -89,7 +89,7 @@ export default function PlaygroundPage() {
         <>
           <Chat state={state} onChanged={refresh} />
           <aside className="w-[400px] shrink-0 overflow-auto border-l border-line bg-panel">
-            <RunPanel run={state.runs[0]} events={state.events} actionRuns={state.action_runs} onChanged={refresh} />
+            <RunPanel runs={state.runs} events={state.events} messages={state.messages} actionRuns={state.action_runs} onChanged={refresh} />
           </aside>
         </>
       ) : (
