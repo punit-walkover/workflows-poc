@@ -12,6 +12,9 @@ export interface TimelineEvent { id: string; run_id: string; node_id: string | n
 export interface TimelineMessage { id: string; text: string; attachments?: { id: string }[] }
 export interface TimelineRun { id: string; status: string; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null; end_reason: string | null; started_at?: string }
 
+// GTWY's history page for the POC agent (e.g. https://gtwy.ai/org/<org>/agents/history/<agent>); the link is hidden when unset.
+const GTWY_HISTORY = process.env.NEXT_PUBLIC_GTWY_HISTORY_URL;
+
 const cut = (s: string, n = 32) => (s.length > n ? `${s.slice(0, n).trimEnd()}…` : s);
 const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 const value = (v: unknown) => cut(typeof v === 'object' ? JSON.stringify(v) : String(v), 40);
@@ -128,6 +131,10 @@ export function RunTimeline({ runs, events, messages = [] }: { runs: TimelineRun
         <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-3">{clock(e.at)}</span>
       </span>
       {open === e.id && <pre className="mt-1 overflow-auto rounded bg-canvas p-2 text-[11px] text-ink-2">{JSON.stringify(e.data, null, 2)}</pre>}
+      {open === e.id && e.data?.gtwy && GTWY_HISTORY && (
+        <a href={`${GTWY_HISTORY}?thread_id=${encodeURIComponent(e.data.gtwy.thread_id)}&subThread_id=${encodeURIComponent(e.data.gtwy.sub_thread_id)}`}
+           target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()} className="mt-1 inline-block text-[11px] text-link hover:underline">Open this call in GTWY ↗</a>
+      )}
     </button>
   );
 

@@ -2,6 +2,7 @@ import { BadRequestException, Logger } from '@nestjs/common';
 import { DBOS } from '@dbos-inc/dbos-sdk';
 import { one, q } from '../db';
 import { checkTopic, freeReply, gate, route } from '../llm/decider';
+import { shortId, traceFor } from '../llm/gtwy';
 import { ACTIVE, RunStatus, Signal, WorkflowGraph, WorkflowNode } from '../types';
 import { flowOf } from './flow';
 import { loadRun, loadTranscript } from './context';
@@ -47,14 +48,14 @@ export async function onCustomerMessage(conversationId: string, messageId: strin
   const workflows = await q<{ id: string; name: string; when_to_use: string; version_id: string }>(
     `select w.id, w.name, w.when_to_use, w.published_version_id as version_id from workflow w
      where w.enabled and w.archived_at is null and w.published_version_id is not null`);
-  const pick = await route(workflows, messages);
+  const pick = await route(workflows, messages, traceFor(conversationId, 'route', shortId(messageId)));
   const outcome = gate(pick);
   await q(`insert into message (conversation_id, role, text) values ($1, 'system', $2)`,
     [conversationId, `Routing: ${outcome} (confidence ${pick.confidence.toFixed(2)}). ${pick.reason}`]);
   const bot = (text: string) => q(`insert into message (conversation_id, role, text) values ($1, 'bot', $2)`, [conversationId, text]);
   if (outcome === 'human') return void (await bot('Sure, I am passing you to a teammate. They will reply here shortly.'));
   if (outcome === 'clarify') return void (await bot(pick.question));
-  if (outcome === 'none') return void (await bot(await freeReply(messages)));
+  if (outcome === 'none') return void (await bot(await freeReply(messages, traceFor(conversationId, 'reply', shortId(messageId)))));
   const wf = workflows.find((w) => w.id === pick.workflow_id)!;
   await startRun(conversationId, wf.version_id, `${pick.reason} (confidence ${pick.confidence.toFixed(2)})`);
 }
@@ -76,7 +77,8 @@ async function switchedTopic(conversationId: string, runId: string, messageId: s
     const messages = await loadTranscript(conversationId);
     const reply = await one<{ text: string }>('select text from message where id = $1', [messageId]);
     const question = [...messages].reverse().find((m) => m.role === 'bot')?.text ?? '';
-    const t = await checkTopic({ current: run!.name, question, reply: reply?.text ?? '', workflows: others, messages });
+    const t = await checkTopic({ current: run!.name, question, reply: reply?.text ?? '', workflows: others, messages,
+                                 trace: traceFor(conversationId, `r${shortId(runId)}`, 'topic', shortId(messageId)) });
     await addEvent(runId, null, 'ai', 'topic_checked', t);
     if (t.kind === 'neither') { await markNotAnswer(runId); return 'neither'; }
     const to = others.find((w) => w.id === t.workflow_id);

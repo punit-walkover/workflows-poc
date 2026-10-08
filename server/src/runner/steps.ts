@@ -2,6 +2,7 @@ import { config } from '../config';
 import { one, q } from '../db';
 import { executeAction, getAction, validateArgs } from '../actions/execute';
 import { chooseCase, compose, decideStep, StepDecision } from '../llm/decider';
+import { shortId, traceFor } from '../llm/gtwy';
 import { ActionRow, Facts, GotoNode, OutboxItem, RunRow, Signal, StepNode } from '../types';
 import { between, renderInline, stepActions } from '../workflows/tree';
 import { checkAnswer, chooseByRules, RETRY, saveResponse } from './blocks';
@@ -71,15 +72,17 @@ export async function decide(runId: string): Promise<Decision> {
   }
   let lastError = '';
   for (let attempt = 0; attempt < 2; attempt++) {
+    // GTWY history: this run's calls group under the conversation's thread, one sub-thread per call.
+    const trace = (what: string) => traceFor(ctx.run.conversation_id, `r${shortId(runId)}`, nodeId, what, `v${visitOf(ctx.run.facts)}`, `a${attempt + 1}`);
     try {
       if (node.type === 'branch') {
-        const c = await chooseCase({ branch: node, vars: ctx.vars, facts: ctx.run.facts, messages: ctx.messages });
+        const c = await chooseCase({ branch: node, vars: ctx.vars, facts: ctx.run.facts, messages: ctx.messages, trace: trace('case') });
         await addEvent(runId, nodeId, 'ai', 'case_chosen', c);
         return { kind: 'case', nodeId, caseId: c.case_id, reason: c.reason };
       }
       const allowed = (await Promise.all(stepActions(node.content).map(getAction))).filter((a): a is ActionRow => !!a?.enabled);
       const d = await decideStep({ workflowName: ctx.version.name, step: node, vars: ctx.vars, allowed, facts: ctx.run.facts,
-                                   messages: ctx.messages, retry: (ctx.run.facts.attempts['!' + nodeId] ?? 0) > 0 });
+                                   messages: ctx.messages, retry: (ctx.run.facts.attempts['!' + nodeId] ?? 0) > 0, trace: trace('decide') });
       await addEvent(runId, nodeId, 'ai', 'llm_decision', d);
       return { kind: 'step', nodeId, d };
     } catch (e: any) {
@@ -296,7 +299,7 @@ export async function flush(runId: string): Promise<string | null> {
   const merge = async () => {
     if (!notes.length) return;
     let text: string;
-    try { text = await compose(notes); } catch { text = notes.join('\n\n'); }
+    try { text = await compose(notes, traceFor(run.conversation_id, `r${shortId(runId)}`, 'compose')); } catch { text = notes.join('\n\n'); }
     parts.push({ text, verbatim: false });
     notes = [];
   };

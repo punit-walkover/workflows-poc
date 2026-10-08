@@ -41,10 +41,20 @@ async function ensureAgent(): Promise<string> {
   return (agentId = agent._id);
 }
 
-export interface LlmResult { content: string; tokens: number | null; ms: number }
+export interface LlmResult { content: string; tokens: number | null; ms: number; gtwy?: { thread_id: string; sub_thread_id: string } }
+
+// Where a call shows up in GTWY's history: one thread per conversation, a fresh sub-thread per call.
+// GTWY loads history by thread + sub-thread, so a never-used sub-thread adds nothing to the prompt; the random
+// suffix keeps that true when DBOS re-runs a step that crashed halfway.
+export interface Trace { thread: string; sub: string }
+export const shortId = (id: string) => id.replace(/[^a-zA-Z0-9]/g, '').slice(0, 8);
+export const traceFor = (conversationId: string, ...parts: (string | number)[]): Trace => ({
+  thread: `conv-${conversationId}`,
+  sub: [...parts.map(String), Math.random().toString(36).slice(2, 6)].join('-').slice(0, 120),
+});
 
 // Stateless call: system prompt overridden per call; json=true asks GTWY for a JSON object.
-export async function chat(system: string, user: string, json: boolean): Promise<LlmResult> {
+export async function chat(system: string, user: string, json: boolean, trace?: Trace): Promise<LlmResult> {
   const id = await ensureAgent();
   const started = Date.now();
   const call = async (token: string) => {
@@ -52,6 +62,7 @@ export async function chat(system: string, user: string, json: boolean): Promise
     return c.chat.completions.create({
       agentId: id,
       user,
+      ...(trace ? { threadId: trace.thread, subThreadId: trace.sub } : {}),
       configuration: { model: g.model, prompt: system, ...(json ? { response_type: { type: 'json_object' }, temperature: 0 } : {}) },
     });
   };
@@ -63,7 +74,8 @@ export async function chat(system: string, user: string, json: boolean): Promise
     reply = await call(await sessionToken(true));
   }
   if (!reply?.content) throw new Error('gtwy returned no content');
-  return { content: String(reply.content), tokens: reply.usage?.totalTokens ?? null, ms: Date.now() - started };
+  return { content: String(reply.content), tokens: reply.usage?.totalTokens ?? null, ms: Date.now() - started,
+           ...(trace ? { gtwy: { thread_id: trace.thread, sub_thread_id: trace.sub } } : {}) };
 }
 
 export function parseJson<T>(content: string): T {

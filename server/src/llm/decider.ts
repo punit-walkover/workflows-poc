@@ -1,6 +1,8 @@
 import { ActionRow, BranchNode, Facts, StepNode } from '../types';
 import { renderInline } from '../workflows/tree';
-import { chat, parseJson } from './gtwy';
+import { chat, LlmResult, parseJson, Trace } from './gtwy';
+
+type GtwyRef = NonNullable<LlmResult['gtwy']>;
 
 export interface Transcript { role: string; text: string; attachments: { id: string; file_name: string }[]; created_at?: string }
 
@@ -13,9 +15,10 @@ export interface StepDecision {
   reason: string;
   tokens?: number | null;
   ms?: number;
+  gtwy?: GtwyRef; // which GTWY call made this decision
 }
 
-export interface CaseDecision { case_id: string | null; reason: string; checks?: unknown; tokens?: number | null; ms?: number }
+export interface CaseDecision { case_id: string | null; reason: string; checks?: unknown; tokens?: number | null; ms?: number; gtwy?: GtwyRef }
 
 const transcript = (msgs: Transcript[]) =>
   msgs.slice(-20).map((m) => {
@@ -40,7 +43,7 @@ JSON: {"decision":"complete|ask_customer|call_action|escalate","collected":{},"m
 
 export async function decideStep(input: {
   workflowName: string; step: StepNode; vars: Record<string, string>; allowed: ActionRow[];
-  facts: Facts; messages: Transcript[]; retry?: boolean;
+  facts: Facts; messages: Transcript[]; retry?: boolean; trace?: Trace;
 }): Promise<StepDecision> {
   const allowed = input.allowed.length
     ? input.allowed.map((a) => `- ${a.key}: ${a.description} Args schema: ${JSON.stringify(a.input_schema)}`).join('\n')
@@ -56,25 +59,25 @@ Customer: ${input.vars['customer.name']} <${input.vars['customer.email']}>
 Known facts (action results are authoritative): ${JSON.stringify({ collected: input.facts.collected, ...(input.facts.vars ? { variables: input.facts.vars } : {}), outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}
 Conversation (oldest first):
 ${transcript(input.messages)}${input.retry ? '\n Follow the rules exactly.' : ''}`;
-  const r = await chat(STEP_SYSTEM, user, true);
+  const r = await chat(STEP_SYSTEM, user, true, input.trace);
   const d = parseJson<StepDecision>(r.content);
   if (!['complete', 'ask_customer', 'call_action', 'escalate'].includes(d.decision)) throw new Error(`bad decision: ${d.decision}`);
-  return { ...d, reason: d.reason || '', tokens: r.tokens, ms: r.ms };
+  return { ...d, reason: d.reason || '', tokens: r.tokens, ms: r.ms, gtwy: r.gtwy };
 }
 
 const CASE_SYSTEM = `You check workflow conditions. For EACH condition, decide if it is true given the known facts (action results are authoritative) and the latest customer messages.
 Answer with ONE JSON object only: {"checks":[{"id":"<condition id>","true":true|false,"why":"short"}],"reason":"one short sentence citing the facts"}.`;
 
 // The model judges each condition; code picks the first true one (else the Else case), so the pick can't contradict the reasoning.
-export async function chooseCase(input: { branch: BranchNode; vars: Record<string, string>; facts: Facts; messages: Transcript[] }): Promise<CaseDecision> {
+export async function chooseCase(input: { branch: BranchNode; vars: Record<string, string>; facts: Facts; messages: Transcript[]; trace?: Trace }): Promise<CaseDecision> {
   const conds = input.branch.cases.filter((c) => c.kind !== 'else');
   const list = conds.map((c) => `- id ${c.id}: ${renderInline(c.condition, input.vars)}`).join('\n');
   const user = `Conditions:\n${list}\nKnown facts: ${JSON.stringify({ collected: input.facts.collected, outputs: input.facts.outputs, ...(input.facts.previous ? { previous_results: input.facts.previous } : {}) })}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`;
-  const r = await chat(CASE_SYSTEM, user, true);
+  const r = await chat(CASE_SYSTEM, user, true, input.trace);
   const d = parseJson<{ checks: { id: string; true: boolean; why?: string }[]; reason: string }>(r.content);
   const truth = new Map((d.checks ?? []).map((c) => [c.id, c.true === true]));
   const hit = conds.find((c) => truth.get(c.id)) ?? input.branch.cases.find((c) => c.kind === 'else') ?? null;
-  return { case_id: hit?.id ?? null, reason: d.reason || "", checks: d.checks, tokens: r.tokens, ms: r.ms };
+  return { case_id: hit?.id ?? null, reason: d.reason || "", checks: d.checks, tokens: r.tokens, ms: r.ms, gtwy: r.gtwy };
 }
 
 const ROUTE_SYSTEM = `You route a customer's message to a support workflow. Answer with ONE JSON object only:
@@ -87,10 +90,10 @@ const ROUTE_SYSTEM = `You route a customer's message to a support workflow. Answ
 export interface RouteGuess { workflow_id: string | null; confidence: number; wants_human: number; question: string; reason: string }
 
 // The WorkflowRouter port. Jev answers the same question in the plan; this adapter uses GTWY.
-export async function route(workflows: { id: string; name: string; when_to_use: string }[], messages: Transcript[]): Promise<RouteGuess> {
+export async function route(workflows: { id: string; name: string; when_to_use: string }[], messages: Transcript[], trace?: Trace): Promise<RouteGuess> {
   if (!workflows.length) return { workflow_id: null, confidence: 0, wants_human: 0, question: '', reason: 'No published workflows' };
   const list = workflows.map((w) => `- id ${w.id}: ${w.name}. When to use: ${w.when_to_use}`).join('\n');
-  const r = await chat(ROUTE_SYSTEM, `Workflows:\n${list}\nConversation:\n${transcript(messages.slice(-6))}`, true);
+  const r = await chat(ROUTE_SYSTEM, `Workflows:\n${list}\nConversation:\n${transcript(messages.slice(-6))}`, true, trace);
   const d = parseJson<RouteGuess>(r.content);
   const known = workflows.some((w) => w.id === d.workflow_id);
   return { workflow_id: known ? d.workflow_id : null, confidence: known ? Number(d.confidence) || 0 : 0,
@@ -106,21 +109,23 @@ export function gate(g: RouteGuess): 'human' | 'start' | 'clarify' | 'none' {
 }
 
 // Several notes from one turn become one natural reply.
-export async function compose(notes: string[]): Promise<string> {
+export async function compose(notes: string[], trace?: Trace): Promise<string> {
   if (notes.length === 1) return notes[0];
   const r = await chat(
     'Merge these notes into ONE short, friendly reply to the customer. Keep every fact, amount and date exactly. Plain text only, no greeting repeated, no sign-off name.',
     notes.map((n, i) => `${i + 1}. ${n}`).join('\n'),
     false,
+    trace,
   );
   return r.content.trim();
 }
 
-export async function freeReply(messages: Transcript[]): Promise<string> {
+export async function freeReply(messages: Transcript[], trace?: Trace): Promise<string> {
   const r = await chat(
     'You are a helpful customer support assistant. Answer briefly and warmly in plain text. If the customer needs something done for them, ask what happened and for the details needed to look it up.',
     `Conversation:\n${transcript(messages)}\nWrite the assistant's next reply.`,
     false,
+    trace,
   );
   return r.content.trim();
 }
@@ -132,21 +137,21 @@ const TOPIC_SYSTEM = `A support workflow is waiting for the customer to answer a
 - neither: not an answer and no other workflow fits (small talk, "I don't know", a question back).
 - confidence: 0 to 1 for your choice. Prefer "answer" when unsure: switching away loses the customer's progress.`;
 
-export interface TopicCheck { kind: 'answer' | 'new_request' | 'neither'; workflow_id: string | null; confidence: number; reason: string }
+export interface TopicCheck { kind: 'answer' | 'new_request' | 'neither'; workflow_id: string | null; confidence: number; reason: string; gtwy?: GtwyRef }
 
 // Topic check: while a run waits on the customer, did they answer, or change the subject to another workflow?
 export async function checkTopic(input: {
   current: string; question: string; reply: string;
-  workflows: { id: string; name: string; when_to_use: string }[]; messages: Transcript[];
+  workflows: { id: string; name: string; when_to_use: string }[]; messages: Transcript[]; trace?: Trace;
 }): Promise<TopicCheck> {
   if (!input.workflows.length) return { kind: 'answer', workflow_id: null, confidence: 1, reason: 'no other workflows' };
   const list = input.workflows.map((w) => `- id ${w.id}: ${w.name}. When to use: ${w.when_to_use}`).join('\n');
   const r = await chat(TOPIC_SYSTEM,
     `Current workflow: ${input.current}\nPending question from the bot: ${input.question || '(none)'}\nCustomer's new message: ${input.reply}\n` +
-    `Other workflows:\n${list}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`, true);
+    `Other workflows:\n${list}\nRecent conversation:\n${transcript(input.messages.slice(-6))}`, true, input.trace);
   const d = parseJson<TopicCheck>(r.content);
   const known = input.workflows.some((w) => w.id === d.workflow_id);
   const kind = (['answer', 'new_request', 'neither'] as const).includes(d.kind) ? d.kind : 'answer';
   return { kind: kind === 'new_request' && !known ? 'neither' : kind, workflow_id: known ? d.workflow_id : null,
-           confidence: Number(d.confidence) || 0, reason: d.reason || '' };
+           confidence: Number(d.confidence) || 0, reason: d.reason || '', gtwy: r.gtwy };
 }
