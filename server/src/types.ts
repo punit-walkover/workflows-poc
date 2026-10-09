@@ -78,6 +78,7 @@ export interface Facts {
   vars?: Record<string, unknown>;     // the workflow's own variables (inputs and saved responses); the AI can't overwrite them
   varsBy?: Record<string, string[]>;  // block id -> variables it filled ("ask again" clears them on a loop back)
   asked?: Record<string, string>; // input block id -> when it last asked (its answer is the next customer message)
+  toolError?: Record<string, string>; // step id -> why its last tool call failed (shown to the AI on its one retry)
   notAnswer?: Record<string, boolean>; // input block id -> the topic check found the latest reply isn't an answer: ask again
   trail?: string[]; // canvas runs: item ids in the order they finished (finds what a loop back re-runs)
 }

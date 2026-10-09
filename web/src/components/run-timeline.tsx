@@ -72,6 +72,7 @@ function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, 
     case 'action_called': return null; // the result line says it ran
     case 'action_result':
       return d.ok ? { icon: Wrench, tone: 'tool', text: `Tool ran successfully` } : { icon: Wrench, tone: 'bad', text: `Tool failed: ${cut(String(d.error ?? ''), 60)}` };
+    case 'tool_retry': return { icon: Wrench, tone: 'bad', text: `Tool failed: ${cut(String(d.error ?? ''), 70)}. AI is retrying` };
     case 'approval_requested': return { icon: ShieldCheck, tone: 'wait', text: `Asked the team to approve: ${cut(String(d.summary ?? ''), 60)}` };
     case 'input_received': {
       const [k, v] = Object.entries(d).find(([key]) => key !== 'format') ?? [];

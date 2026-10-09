@@ -251,6 +251,7 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
   // call_action
   if (!out) return fail(nodeId, 'no action outcome');
   if (out.status === 'done') {
+    delete r.facts.toolError?.[nodeId];
     const first = !(nodeId in r.facts.outputs);
     r.facts.outputs[nodeId] = out.output;
     if (first) await keepResponse(runId, r, flow.node(nodeId) as StepNode, out.output);
@@ -260,7 +261,14 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
     return moveOn(nodeId);
   }
   if (out.status === 'escalated') { say(d.message || 'I am handing this to a teammate who will reply shortly.'); return finish('escalated', out.reason); }
-  if (out.status === 'failed') return fail(nodeId, out.error);
+  if (out.status === 'failed') {
+    // One retry with the error in the prompt (e.g. a wrong column name the AI guessed); a second failure fails the run.
+    if (r.facts.toolError?.[nodeId]) return fail(nodeId, out.error);
+    (r.facts.toolError ??= {})[nodeId] = out.error;
+    await addEvent(runId, nodeId, 'system', 'tool_retry', { error: out.error });
+    await saveRun(runId, { ...r, status: 'running' });
+    return { next: 'continue' };
+  }
   if (out.status === 'invalid') {
     r.facts.attempts['!' + nodeId] = (r.facts.attempts['!' + nodeId] ?? 0) + 1;
     await addEvent(runId, nodeId, 'system', 'invalid_action', { error: out.error });
