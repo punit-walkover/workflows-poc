@@ -25,8 +25,21 @@ export function builderToken() {
 export async function runFlow(url: string, args: Record<string, unknown>) {
   if (!/^https:\/\/flow\.sokt\.io\/func\/[A-Za-z0-9_-]+$/.test(url)) throw new Error('not a viaSocket flow URL');
   const r = await axios.post(url, args, { timeout: 60_000, validateStatus: () => true });
-  if (r.status >= 400) throw new Error(`flow failed (${r.status}): ${JSON.stringify(r.data).slice(0, 300)}`);
+  const problem = flowError(r.status, r.data);
+  if (problem) throw new Error(problem);
   return r.data ?? {};
+}
+
+// Flows often answer HTTP 200 and put the failure in the body ({ success: false } or { status: 400, message }).
+// Those are failures too, or the run would carry on as if the tool had worked.
+export function flowError(httpStatus: number, body: any): string | null {
+  const said = (b: any) => String(b?.message ?? b?.error?.message ?? (typeof b?.error === 'string' ? b.error : '') ?? '').trim();
+  if (httpStatus >= 400) return said(body) || `flow failed (HTTP ${httpStatus}): ${JSON.stringify(body).slice(0, 300)}`;
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const status = Number(body.status ?? body.statusCode);
+  if (body.success === false || (Number.isFinite(status) && status >= 400) || (body.error && body.error !== false))
+    return said(body) || `flow reported an error: ${JSON.stringify(body).slice(0, 300)}`;
+  return null;
 }
 
 // Older app actions (source 'viasocket') still run through a stored, encrypted app connection.
