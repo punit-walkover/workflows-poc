@@ -14,11 +14,12 @@ export interface StepDecision {
   action?: { key: string; args: Record<string, unknown> };
   reason: string;
   tokens?: number | null;
+  cost?: number | null;
   ms?: number;
   gtwy?: GtwyRef; // which GTWY call made this decision
 }
 
-export interface CaseDecision { case_id: string | null; reason: string; checks?: unknown; tokens?: number | null; ms?: number; gtwy?: GtwyRef }
+export interface CaseDecision { case_id: string | null; reason: string; checks?: unknown; tokens?: number | null; cost?: number | null; ms?: number; gtwy?: GtwyRef }
 
 const transcript = (msgs: Transcript[]) =>
   msgs.slice(-20).map((m) => {
@@ -62,7 +63,7 @@ ${transcript(input.messages)}${input.retry ? '\n Follow the rules exactly.' : ''
   const r = await chat(STEP_SYSTEM, user, true, input.trace);
   const d = parseJson<StepDecision>(r.content);
   if (!['complete', 'ask_customer', 'call_action', 'escalate'].includes(d.decision)) throw new Error(`bad decision: ${d.decision}`);
-  return { ...d, reason: d.reason || '', tokens: r.tokens, ms: r.ms, gtwy: r.gtwy };
+  return { ...d, reason: d.reason || '', tokens: r.tokens, cost: r.cost, ms: r.ms, gtwy: r.gtwy };
 }
 
 const CASE_SYSTEM = `You check workflow conditions. For EACH condition, decide if it is true given the known facts (action results are authoritative) and the latest customer messages.
@@ -77,7 +78,7 @@ export async function chooseCase(input: { branch: BranchNode; vars: Record<strin
   const d = parseJson<{ checks: { id: string; true: boolean; why?: string }[]; reason: string }>(r.content);
   const truth = new Map((d.checks ?? []).map((c) => [c.id, c.true === true]));
   const hit = conds.find((c) => truth.get(c.id)) ?? input.branch.cases.find((c) => c.kind === 'else') ?? null;
-  return { case_id: hit?.id ?? null, reason: d.reason || "", checks: d.checks, tokens: r.tokens, ms: r.ms, gtwy: r.gtwy };
+  return { case_id: hit?.id ?? null, reason: d.reason || "", checks: d.checks, tokens: r.tokens, cost: r.cost, ms: r.ms, gtwy: r.gtwy };
 }
 
 const ROUTE_SYSTEM = `You route a customer's message to a support workflow. Answer with ONE JSON object only:
@@ -108,16 +109,16 @@ export function gate(g: RouteGuess): 'human' | 'start' | 'clarify' | 'none' {
   return 'none';
 }
 
-// Several notes from one turn become one natural reply.
-export async function compose(notes: string[], trace?: Trace): Promise<string> {
-  if (notes.length === 1) return notes[0];
+// Several notes from one turn become one natural reply (cost is null when no AI call was needed).
+export async function compose(notes: string[], trace?: Trace): Promise<{ text: string; tokens: number | null; cost: number | null }> {
+  if (notes.length === 1) return { text: notes[0], tokens: null, cost: null };
   const r = await chat(
     'Merge these notes into ONE short, friendly reply to the customer. Keep every fact, amount and date exactly. Plain text only, no greeting repeated, no sign-off name.',
     notes.map((n, i) => `${i + 1}. ${n}`).join('\n'),
     false,
     trace,
   );
-  return r.content.trim();
+  return { text: r.content.trim(), tokens: r.tokens, cost: r.cost };
 }
 
 export async function freeReply(messages: Transcript[], trace?: Trace): Promise<string> {
@@ -137,7 +138,7 @@ const TOPIC_SYSTEM = `A support workflow is waiting for the customer to answer a
 - neither: not an answer and no other workflow fits (small talk, "I don't know", a question back).
 - confidence: 0 to 1 for your choice. Prefer "answer" when unsure: switching away loses the customer's progress.`;
 
-export interface TopicCheck { kind: 'answer' | 'new_request' | 'neither'; workflow_id: string | null; confidence: number; reason: string; gtwy?: GtwyRef }
+export interface TopicCheck { kind: 'answer' | 'new_request' | 'neither'; workflow_id: string | null; confidence: number; reason: string; tokens?: number | null; cost?: number | null; gtwy?: GtwyRef }
 
 // Topic check: while a run waits on the customer, did they answer, or change the subject to another workflow?
 export async function checkTopic(input: {
@@ -153,5 +154,5 @@ export async function checkTopic(input: {
   const known = input.workflows.some((w) => w.id === d.workflow_id);
   const kind = (['answer', 'new_request', 'neither'] as const).includes(d.kind) ? d.kind : 'answer';
   return { kind: kind === 'new_request' && !known ? 'neither' : kind, workflow_id: known ? d.workflow_id : null,
-           confidence: Number(d.confidence) || 0, reason: d.reason || '', gtwy: r.gtwy };
+           confidence: Number(d.confidence) || 0, reason: d.reason || '', tokens: r.tokens, cost: r.cost, gtwy: r.gtwy };
 }

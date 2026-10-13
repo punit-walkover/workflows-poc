@@ -294,13 +294,13 @@ export async function advance(runId: string, dec: Decision, out: ActOutcome | nu
 export async function flush(runId: string): Promise<string | null> {
   const run = await one<RunRow>('select * from workflow_run where id = $1', [runId]);
   if (!run?.outbox.length) return null;
-  const parts: { text: string; verbatim: boolean; nodeId?: string }[] = [];
+  const parts: { text: string; verbatim: boolean; nodeId?: string; tokens?: number | null; cost?: number | null }[] = [];
   let notes: string[] = [];
   const merge = async () => {
     if (!notes.length) return;
-    let text: string;
-    try { text = await compose(notes, traceFor(run.conversation_id, `r${shortId(runId)}`, 'compose')); } catch { text = notes.join('\n\n'); }
-    parts.push({ text, verbatim: false });
+    let merged: { text: string; tokens: number | null; cost: number | null };
+    try { merged = await compose(notes, traceFor(run.conversation_id, `r${shortId(runId)}`, 'compose')); } catch { merged = { text: notes.join('\n\n'), tokens: null, cost: null }; }
+    parts.push({ ...merged, verbatim: false });
     notes = [];
   };
   for (const item of run.outbox as OutboxItem[]) {
@@ -312,7 +312,8 @@ export async function flush(runId: string): Promise<string | null> {
   for (const p of parts) {
     const m = await one<{ id: string }>(`insert into message (conversation_id, role, text, run_id) values ($1, 'bot', $2, $3) returning id`,
       [run.conversation_id, p.text, runId]);
-    await addEvent(runId, p.nodeId ?? run.current_node_id, p.verbatim ? 'system' : 'ai', 'message_sent', { text: p.text });
+    await addEvent(runId, p.nodeId ?? run.current_node_id, p.verbatim ? 'system' : 'ai', 'message_sent',
+      { text: p.text, ...(p.cost != null || p.tokens != null ? { tokens: p.tokens, cost: p.cost } : {}) }); // cost: the AI merged notes into it
     last = m!.id;
   }
   await q(`update workflow_run set outbox = '[]'::jsonb where id = $1`, [runId]);

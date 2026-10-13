@@ -3,6 +3,7 @@ import axios from 'axios';
 import { Gtwy } from 'gtwy-sdk';
 import { config } from '../config';
 import { one, q } from '../db';
+import { priceOf } from './prices';
 
 const g = config.gtwy;
 let session: { token: string; exp: number } | null = null;
@@ -41,7 +42,7 @@ async function ensureAgent(): Promise<string> {
   return (agentId = agent._id);
 }
 
-export interface LlmResult { content: string; tokens: number | null; ms: number; gtwy?: { thread_id: string; sub_thread_id: string } }
+export interface LlmResult { content: string; tokens: number | null; cost: number | null; ms: number; gtwy?: { thread_id: string; sub_thread_id: string } }
 
 // Where a call shows up in GTWY's history: one thread per conversation, a fresh sub-thread per call.
 // GTWY loads history by thread + sub-thread, so a never-used sub-thread adds nothing to the prompt; the random
@@ -57,14 +58,16 @@ export const traceFor = (conversationId: string, ...parts: (string | number)[]):
 export async function chat(system: string, user: string, json: boolean, trace?: Trace): Promise<LlmResult> {
   const id = await ensureAgent();
   const started = Date.now();
+  // What GTWY receives (the session token goes in the client, not here); saved with the call for the run panel.
+  const request = {
+    agentId: id,
+    user,
+    ...(trace ? { threadId: trace.thread, subThreadId: trace.sub } : {}),
+    configuration: { model: g.model, prompt: system, ...(json ? { response_type: { type: 'json_object' }, temperature: 0 } : {}) },
+  };
   const call = async (token: string) => {
     const c = new Gtwy({ Authorization: token, timeout: 90_000 } as any) as any;
-    return c.chat.completions.create({
-      agentId: id,
-      user,
-      ...(trace ? { threadId: trace.thread, subThreadId: trace.sub } : {}),
-      configuration: { model: g.model, prompt: system, ...(json ? { response_type: { type: 'json_object' }, temperature: 0 } : {}) },
-    });
+    return c.chat.completions.create(request);
   };
   let reply: any;
   try {
@@ -74,8 +77,24 @@ export async function chat(system: string, user: string, json: boolean, trace?: 
     reply = await call(await sessionToken(true));
   }
   if (!reply?.content) throw new Error('gtwy returned no content');
-  return { content: String(reply.content), tokens: reply.usage?.totalTokens ?? null, ms: Date.now() - started,
+  const ms = Date.now() - started;
+  const response = JSON.parse(JSON.stringify(reply)); // the SDK object serialises to GTWY's raw reply
+  const cost = await recordUsage(trace, reply.usage, ms, { rounds: [{ round: 1, request, response }], final_text: String(reply.content) });
+  return { content: String(reply.content), tokens: reply.usage?.totalTokens ?? null, cost, ms,
            ...(trace ? { gtwy: { thread_id: trace.thread, sub_thread_id: trace.sub } } : {}) };
+}
+
+// Every call is a row in llm_usage, with its request and reply. Cost is what GTWY reports, else tokens × prices.ts. Returns the cost.
+async function recordUsage(trace: Trace | undefined, usage: any, ms: number, exchange: object): Promise<number | null> {
+  const model = `${g.service}/${g.model}`;
+  const input = usage?.inputTokens ?? null, output = usage?.outputTokens ?? null;
+  const cost = typeof usage?.cost === 'number' ? usage.cost : priceOf(model, input, output);
+  const purpose = trace?.sub.split('-').find((p) => ['route', 'decide', 'case', 'compose', 'topic', 'reply'].includes(p)) ?? 'call';
+  await q(`insert into llm_usage (conversation_id, purpose, model, input_tokens, output_tokens, cost_usd, ms, started_at, trace)
+             values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
+    [trace?.thread.replace(/^conv-/, '') ?? null, purpose, model, input, output, cost, ms, new Date(Date.now() - ms), JSON.stringify(exchange)])
+    .catch((e) => console.warn(`llm_usage not recorded: ${e.message}`)); // never fail the chat over bookkeeping
+  return cost;
 }
 
 export function parseJson<T>(content: string): T {

@@ -4,6 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Check, ChevronRight, Clock, CornerUpLeft, GitBranch, MessageSquare, Save, ShieldCheck, Sparkles, User, Wrench, X,
 } from 'lucide-react';
 import { useState } from 'react';
+import { usd } from '@/lib/api';
 import type { WorkflowGraph } from '@/lib/graph';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
 import { StatusChip } from './ui';
@@ -49,8 +50,10 @@ type Line = { icon: typeof Check; tone: Tone; text: string } | null;
 
 function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, TimelineMessage>): Line {
   const d = e.data ?? {};
+  // The AI call behind this line: its cost (and tokens), when it made one.
+  const c = d.cost != null ? ` · ${usd(Number(d.cost))}` : d.tokens ? ` · ${d.tokens} tokens` : '';
   switch (e.type) {
-    case 'message_sent': return { icon: MessageSquare, tone: 'bot', text: `Bot: “${cut(String(d.text ?? ''), 90)}”` };
+    case 'message_sent': return { icon: MessageSquare, tone: 'bot', text: `Bot: “${cut(String(d.text ?? ''), 90)}”${d.cost != null || d.tokens ? `${c} (AI merged the notes)` : ''}` };
     case 'signal':
       if (d.type === 'customer_message') {
         // The signal only carries the message id; show what the customer actually wrote.
@@ -68,10 +71,10 @@ function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, 
       return asked ? null : { icon: Clock, tone: 'wait', text: `Waiting for the customer${d.expects?.length ? ` (${d.expects.join(', ')})` : ''}` };
     }
     case 'llm_decision':
-      if (d.decision === 'call_action') return { icon: Sparkles, tone: 'ai', text: `AI chose to use @${d.action?.key}` };
-      if (d.decision === 'ask_customer') return { icon: Sparkles, tone: 'ai', text: `AI asked the customer${d.missing?.length ? ` for ${d.missing.join(', ')}` : ''}` };
-      if (d.decision === 'escalate') return { icon: Sparkles, tone: 'bad', text: 'AI handed the chat to a person' };
-      return { icon: Sparkles, tone: 'ai', text: 'AI finished the step' };
+      if (d.decision === 'call_action') return { icon: Sparkles, tone: 'ai', text: `AI chose to use @${d.action?.key}${c}` };
+      if (d.decision === 'ask_customer') return { icon: Sparkles, tone: 'ai', text: `AI asked the customer${d.missing?.length ? ` for ${d.missing.join(', ')}` : ''}${c}` };
+      if (d.decision === 'escalate') return { icon: Sparkles, tone: 'bad', text: `AI handed the chat to a person${c}` };
+      return { icon: Sparkles, tone: 'ai', text: `AI finished the step${c}` };
     case 'action_called': return null; // the result line says it ran
     case 'action_result':
       return d.ok ? { icon: Wrench, tone: 'tool', text: `Tool ran successfully` } : { icon: Wrench, tone: 'bad', text: `Tool failed: ${cut(String(d.error ?? ''), 60)}` };
@@ -87,11 +90,11 @@ function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, 
       const missing = (d.missing ?? []) as string[];
       return { icon: Save, tone: missing.length && !saved.length ? 'bad' : 'ok', text: [saved.length ? `Saved ${saved.join(', ')}` : '', missing.length ? `not in response: ${missing.join(', ')}` : ''].filter(Boolean).join(' · ') };
     }
-    case 'case_chosen': return { icon: GitBranch, tone: 'ai', text: d.case_id ? `Condition matched: ${cut(String(d.reason ?? ''), 70)}` : 'No condition matched' };
+    case 'case_chosen': return { icon: GitBranch, tone: 'ai', text: d.case_id ? `Condition matched: ${cut(String(d.reason ?? ''), 70)}${c}` : `No condition matched${c}` };
     case 'topic_checked':
-      if (d.kind === 'answer') return null;
-      if (d.kind === 'neither') return { icon: Sparkles, tone: 'muted', text: "Reply didn't answer the question" };
-      return null; // a switch shows as the marker between runs
+      if (d.kind === 'neither') return { icon: Sparkles, tone: 'muted', text: `Reply didn't answer the question${c}` };
+      // An answer or a switch needs no line of its own (the switch marker shows a switch); keep one when the check cost something.
+      return d.cost != null ? { icon: Sparkles, tone: 'muted', text: `Topic check: ${d.kind === 'answer' ? 'reply answers the question' : 'new request'}${c}` } : null;
     case 'goto_jumped': return { icon: CornerUpLeft, tone: 'ai', text: `Went back (try ${d.visit} of ${d.max_visits ?? '∞'})` };
     case 'goto_limit': return { icon: AlertTriangle, tone: 'bad', text: 'Repeat limit reached, handed to a person' };
     case 'reminder_sent': return { icon: Clock, tone: 'wait', text: 'Sent a reminder' };

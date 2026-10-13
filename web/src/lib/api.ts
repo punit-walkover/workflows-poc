@@ -67,4 +67,7 @@ export async function api<T = any>(path: string, init?: { method?: string; body?
   }
 }
 
+// AI cost in dollars: small amounts keep 4 decimals so a single call isn't shown as $0.00.
+export const usd = (n?: number | null) => (n == null ? '—' : n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+
 export const money = (minor?: number | string | null) => (minor == null ? '' : `$${(Number(minor) / 100).toFixed(2)}`);
