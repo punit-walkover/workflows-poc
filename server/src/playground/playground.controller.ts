@@ -28,10 +28,10 @@ export class PlaygroundController {
   // One AI call's full exchange: the request sent to GTWY and its reply.
   @Get('ai-calls/:id')
   async aiCall(@Param('id') id: string) {
-    const u = await one(`select id, conversation_id, purpose, model, input_tokens, output_tokens, cost_usd, ms,
+    const u = await one(`select id, conversation_id, purpose, model, input_tokens, output_tokens, cost_usd::text as cost_usd, ms,
                                 coalesce(started_at, created_at) as started_at, trace from llm_usage where id::text = $1`, [id]);
     if (!u) throw new NotFoundException();
-    return { ...u, cost_usd: u.cost_usd === null ? null : Number(u.cost_usd) };
+    return u; // cost_usd as text: exactly what GTWY reported
   }
 
   // Everything the playground screen shows, in one poll.
@@ -53,14 +53,16 @@ export class PlaygroundController {
     const approvals = await q(`select * from approval_task where conversation_id = $1 order by created_at desc`, [id]);
     const actionRuns = runs[0] ? await q('select * from action_run where run_id = $1 order by started_at', [runs[0].id]) : [];
     // Every AI call of this conversation (routing, topic checks, steps, conditions, merged replies) and the totals.
-    const calls = (await q(`select id, purpose, model, input_tokens, output_tokens, cost_usd, ms, coalesce(started_at, created_at) as created_at from llm_usage
-                            where conversation_id = $1 order by coalesce(started_at, created_at), id`, [id])).map((u: any) => ({ ...u, cost_usd: u.cost_usd === null ? null : Number(u.cost_usd) }));
+    // Costs stay text, exactly as GTWY reported them; the total is summed in Postgres (numeric), so nothing is rounded.
+    const calls = await q(`select id, purpose, model, input_tokens, output_tokens, cost_usd::text as cost_usd, ms, coalesce(started_at, created_at) as created_at from llm_usage
+                           where conversation_id = $1 order by coalesce(started_at, created_at), id`, [id]);
+    const total = await one<{ cost: string | null }>('select sum(cost_usd)::text as cost from llm_usage where conversation_id = $1', [id]);
     const ai_usage = {
       calls, count: calls.length,
       input_tokens: calls.reduce((n: number, u: any) => n + (u.input_tokens ?? 0), 0),
       output_tokens: calls.reduce((n: number, u: any) => n + (u.output_tokens ?? 0), 0),
-      cost_usd: calls.reduce((n: number, u: any) => n + (u.cost_usd ?? 0), 0),
-      unpriced: [...new Set(calls.filter((u: any) => u.cost_usd === null).map((u: any) => u.model))],
+      cost_usd: total?.cost ?? null,
+      no_cost: calls.filter((u: any) => u.cost_usd === null).length, // calls GTWY sent no cost for
     };
     return { conversation, messages, runs, events, approvals, action_runs: actionRuns, ai_usage };
   }

@@ -51,7 +51,7 @@ type Line = { icon: typeof Check; tone: Tone; text: string } | null;
 function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, TimelineMessage>): Line {
   const d = e.data ?? {};
   // The AI call behind this line: its cost (and tokens), when it made one.
-  const c = d.cost != null ? ` · ${usd(Number(d.cost))}` : d.tokens ? ` · ${d.tokens} tokens` : '';
+  const c = d.cost != null ? ` · ${usd(d.cost)}` : d.tokens ? ` · ${d.tokens} tokens` : '';
   switch (e.type) {
     case 'message_sent': return { icon: MessageSquare, tone: 'bot', text: `Bot: “${cut(String(d.text ?? ''), 90)}”${d.cost != null || d.tokens ? `${c} (AI merged the notes)` : ''}` };
     case 'signal':
