@@ -4,12 +4,12 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImagePlus, Plus, Send, X } from 'lucide-react';
 import { api, API } from '@/lib/api';
 import { AttentionDot, Button, StatusChip } from '@/components/ui';
-import { ApprovalCard, EventRow, RunPanel, RunView, Task } from '@/components/run-panel';
+import { AiUsage, ApprovalCard, EventRow, RunPanel, RunView, Task } from '@/components/run-panel';
 import type { ActionRun } from '@/components/tool-call';
 
 interface Conv { id: string; customer_name: string; customer_email: string; channel: string; run_status: string | null; last_text: string | null; pending_approvals: number }
 interface Msg { id: string; role: 'customer' | 'bot' | 'team' | 'system'; text: string; attachments: { id: string; file_name: string; mime_type: string }[]; created_at: string }
-interface State { conversation: Conv; messages: Msg[]; runs: RunView[]; events: EventRow[]; approvals: Task[]; action_runs: ActionRun[] }
+interface State { conversation: Conv; messages: Msg[]; runs: RunView[]; events: EventRow[]; approvals: Task[]; action_runs: ActionRun[]; ai_usage?: AiUsage }
 
 const PERSONAS = [
   { name: 'Alex Kim', email: 'alex@example.com' },
@@ -89,7 +89,7 @@ export default function PlaygroundPage() {
         <>
           <Chat state={state} onChanged={refresh} />
           <aside className="w-[400px] shrink-0 overflow-auto border-l border-line bg-panel">
-            <RunPanel runs={state.runs} events={state.events} messages={state.messages} actionRuns={state.action_runs} onChanged={refresh} />
+            <RunPanel runs={state.runs} events={state.events} messages={state.messages} actionRuns={state.action_runs} usage={state.ai_usage} onChanged={refresh} />
           </aside>
         </>
       ) : (

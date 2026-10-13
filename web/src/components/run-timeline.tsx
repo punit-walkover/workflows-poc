@@ -4,6 +4,7 @@ import {
   AlertTriangle, ArrowLeftRight, Check, ChevronRight, Clock, CornerUpLeft, GitBranch, MessageSquare, Save, ShieldCheck, Sparkles, User, Wrench, X,
 } from 'lucide-react';
 import { useState } from 'react';
+import { usd } from '@/lib/api';
 import type { WorkflowGraph } from '@/lib/graph';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
 import { StatusChip } from './ui';
@@ -11,6 +12,9 @@ import { StatusChip } from './ui';
 export interface TimelineEvent { id: string; run_id: string; node_id: string | null; actor: string; type: string; data: any; at: string }
 export interface TimelineMessage { id: string; text: string; attachments?: { id: string }[] }
 export interface TimelineRun { id: string; status: string; workflow_name: string; version: number; steps: WorkflowNode[]; graph?: WorkflowGraph | null; end_reason: string | null; started_at?: string }
+
+// GTWY's history page for the POC agent (e.g. https://gtwy.ai/org/<org>/agents/history/<agent>); the link is hidden when unset.
+const GTWY_HISTORY = process.env.NEXT_PUBLIC_GTWY_HISTORY_URL;
 
 const cut = (s: string, n = 32) => (s.length > n ? `${s.slice(0, n).trimEnd()}…` : s);
 const clock = (at: string) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -46,8 +50,10 @@ type Line = { icon: typeof Check; tone: Tone; text: string } | null;
 
 function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, TimelineMessage>): Line {
   const d = e.data ?? {};
+  // The AI call behind this line: its cost (and tokens), when it made one.
+  const c = d.cost != null ? ` · ${usd(Number(d.cost))}` : d.tokens ? ` · ${d.tokens} tokens` : '';
   switch (e.type) {
-    case 'message_sent': return { icon: MessageSquare, tone: 'bot', text: `Bot: “${cut(String(d.text ?? ''), 90)}”` };
+    case 'message_sent': return { icon: MessageSquare, tone: 'bot', text: `Bot: “${cut(String(d.text ?? ''), 90)}”${d.cost != null || d.tokens ? `${c} (AI merged the notes)` : ''}` };
     case 'signal':
       if (d.type === 'customer_message') {
         // The signal only carries the message id; show what the customer actually wrote.
@@ -65,10 +71,10 @@ function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, 
       return asked ? null : { icon: Clock, tone: 'wait', text: `Waiting for the customer${d.expects?.length ? ` (${d.expects.join(', ')})` : ''}` };
     }
     case 'llm_decision':
-      if (d.decision === 'call_action') return { icon: Sparkles, tone: 'ai', text: `AI chose to use @${d.action?.key}` };
-      if (d.decision === 'ask_customer') return { icon: Sparkles, tone: 'ai', text: `AI asked the customer${d.missing?.length ? ` for ${d.missing.join(', ')}` : ''}` };
-      if (d.decision === 'escalate') return { icon: Sparkles, tone: 'bad', text: 'AI handed the chat to a person' };
-      return { icon: Sparkles, tone: 'ai', text: 'AI finished the step' };
+      if (d.decision === 'call_action') return { icon: Sparkles, tone: 'ai', text: `AI chose to use @${d.action?.key}${c}` };
+      if (d.decision === 'ask_customer') return { icon: Sparkles, tone: 'ai', text: `AI asked the customer${d.missing?.length ? ` for ${d.missing.join(', ')}` : ''}${c}` };
+      if (d.decision === 'escalate') return { icon: Sparkles, tone: 'bad', text: `AI handed the chat to a person${c}` };
+      return { icon: Sparkles, tone: 'ai', text: `AI finished the step${c}` };
     case 'action_called': return null; // the result line says it ran
     case 'action_result':
       return d.ok ? { icon: Wrench, tone: 'tool', text: `Tool ran successfully` } : { icon: Wrench, tone: 'bad', text: `Tool failed: ${cut(String(d.error ?? ''), 60)}` };
@@ -84,11 +90,11 @@ function sentence(e: TimelineEvent, all: TimelineEvent[], messages: Map<string, 
       const missing = (d.missing ?? []) as string[];
       return { icon: Save, tone: missing.length && !saved.length ? 'bad' : 'ok', text: [saved.length ? `Saved ${saved.join(', ')}` : '', missing.length ? `not in response: ${missing.join(', ')}` : ''].filter(Boolean).join(' · ') };
     }
-    case 'case_chosen': return { icon: GitBranch, tone: 'ai', text: d.case_id ? `Condition matched: ${cut(String(d.reason ?? ''), 70)}` : 'No condition matched' };
+    case 'case_chosen': return { icon: GitBranch, tone: 'ai', text: d.case_id ? `Condition matched: ${cut(String(d.reason ?? ''), 70)}${c}` : `No condition matched${c}` };
     case 'topic_checked':
-      if (d.kind === 'answer') return null;
-      if (d.kind === 'neither') return { icon: Sparkles, tone: 'muted', text: "Reply didn't answer the question" };
-      return null; // a switch shows as the marker between runs
+      if (d.kind === 'neither') return { icon: Sparkles, tone: 'muted', text: `Reply didn't answer the question${c}` };
+      // An answer or a switch needs no line of its own (the switch marker shows a switch); keep one when the check cost something.
+      return d.cost != null ? { icon: Sparkles, tone: 'muted', text: `Topic check: ${d.kind === 'answer' ? 'reply answers the question' : 'new request'}${c}` } : null;
     case 'goto_jumped': return { icon: CornerUpLeft, tone: 'ai', text: `Went back (try ${d.visit} of ${d.max_visits ?? '∞'})` };
     case 'goto_limit': return { icon: AlertTriangle, tone: 'bad', text: 'Repeat limit reached, handed to a person' };
     case 'reminder_sent': return { icon: Clock, tone: 'wait', text: 'Sent a reminder' };
@@ -128,6 +134,10 @@ export function RunTimeline({ runs, events, messages = [] }: { runs: TimelineRun
         <span className="shrink-0 whitespace-nowrap text-[11px] text-ink-3">{clock(e.at)}</span>
       </span>
       {open === e.id && <pre className="mt-1 overflow-auto rounded bg-canvas p-2 text-[11px] text-ink-2">{JSON.stringify(e.data, null, 2)}</pre>}
+      {open === e.id && e.data?.gtwy && GTWY_HISTORY && (
+        <a href={`${GTWY_HISTORY}?thread_id=${encodeURIComponent(e.data.gtwy.thread_id)}&subThread_id=${encodeURIComponent(e.data.gtwy.sub_thread_id)}`}
+           target="_blank" rel="noreferrer" onClick={(ev) => ev.stopPropagation()} className="mt-1 inline-block text-[11px] text-link hover:underline">Open this call in GTWY ↗</a>
+      )}
     </button>
   );
 

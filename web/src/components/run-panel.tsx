@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Check, Circle, CircleDot, Clock, CornerUpLeft, Database, History, ListChecks, Loader2, Minus } from 'lucide-react';
-import { api, API, money } from '@/lib/api';
+import { api, API, money, usd } from '@/lib/api';
 import { inlineText, type WorkflowNode } from '@/lib/tree';
 import { reachableFrom, ruleText, type WorkflowGraph } from '@/lib/graph';
 import { Button, StatusChip } from './ui';
@@ -11,6 +11,7 @@ import { ActionRun, ToolCalls } from './tool-call';
 import { DbosStep, DbosSteps } from './dbos-steps';
 import { nodeLabels, RunTimeline, TimelineMessage } from './run-timeline';
 import { JsonView } from './json-view';
+import { AiCallDialog, PURPOSE } from './ai-call';
 import { ChevronRight } from 'lucide-react';
 
 export interface RunView {
@@ -23,16 +24,57 @@ export interface Task { id: string; run_id: string; status: string; kind: string
 
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
+// Every AI call of the conversation (routing, topic checks, steps, conditions, merged replies) and the totals.
+export interface AiCall { id: string; purpose: string; model: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; ms: number | null; created_at: string }
+export interface AiUsage { calls: AiCall[]; count: number; input_tokens: number; output_tokens: number; cost_usd: number; unpriced: string[] }
+
+const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+const clock = (s: string) => new Date(s).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+// Top of the panel: what this conversation's AI has cost so far; open it for each call, click a call for its request and response.
+function AiCost({ usage }: { usage?: AiUsage }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  if (!usage?.count) return null;
+  return (
+    <>
+    {openId && <AiCallDialog id={openId} onClose={() => setOpenId(null)} />}
+    <details className="group rounded-lg border border-line bg-panel">
+      <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs">
+        <ChevronRight size={12} className="text-ink-3 transition-transform group-open:rotate-90" />
+        <span className="text-ink-2">AI cost for this conversation</span>
+        <span className="ml-auto font-semibold tabular-nums text-ink">{usage.unpriced.length && !usage.cost_usd ? 'price not set' : usd(usage.cost_usd)}</span>
+        <span className="tabular-nums text-ink-3">· {usage.count} call{usage.count === 1 ? '' : 's'} · {k(usage.input_tokens + usage.output_tokens)} tokens</span>
+      </summary>
+      {usage.unpriced.length > 0 && (
+        <div className="px-3 pb-1 text-[11px] text-warn">No price for {usage.unpriced.join(', ')}: those calls count as $0 (add it to server/src/llm/prices.ts).</div>
+      )}
+      <div className="max-h-56 overflow-auto border-t border-line text-[11px]">
+        {usage.calls.map((c) => (
+          <button key={c.id} type="button" title="Show the full request and response" onClick={() => setOpenId(String(c.id))}
+                  className="grid w-full grid-cols-[4.5rem_minmax(0,1fr)_auto_auto] gap-2 border-b border-line px-3 py-1 text-left last:border-b-0 hover:bg-hover">
+            <span className="tabular-nums text-ink-3">{clock(c.created_at)}</span>
+            <span className="truncate text-ink-2" title={c.model}>{PURPOSE[c.purpose] ?? c.purpose}</span>
+            <span className="tabular-nums text-ink-3">{k(c.input_tokens ?? 0)} in · {k(c.output_tokens ?? 0)} out</span>
+            <span className="w-14 text-right font-medium tabular-nums text-ink">{usd(c.cost_usd)}</span>
+          </button>
+        ))}
+      </div>
+    </details>
+    </>
+  );
+}
+
 // Approval cards live in the chat timeline only; the header's waiting line says when the run waits on one.
 // Steps show the current run (runs[0]); the timeline covers every run of the chat (e.g. before and after a topic switch).
-export function RunPanel({ runs, events, messages, actionRuns = [], onChanged }: { runs: RunView[]; events: EventRow[]; messages?: TimelineMessage[]; actionRuns?: ActionRun[]; onChanged: () => void }) {
+export function RunPanel({ runs, events, messages, actionRuns = [], usage, onChanged }: { runs: RunView[]; events: EventRow[]; messages?: TimelineMessage[]; actionRuns?: ActionRun[]; usage?: AiUsage; onChanged: () => void }) {
   const run = runs[0];
   const [dbos, setDbos] = useState<DbosStep[] | null>(null);
   const [error, setError] = useState('');
   if (!run) {
     return (
-      <div className="p-5 text-ink-2">
-        <div className="mb-1 font-medium text-ink">No workflow running</div>
+      <div className="flex flex-col gap-3 p-5 text-ink-2">
+        <AiCost usage={usage} />
+        <div className="font-medium text-ink">No workflow running</div>
         The bot answers freely until a message matches a published workflow&apos;s <i>When to use</i>.
       </div>
     );
@@ -50,6 +92,7 @@ export function RunPanel({ runs, events, messages, actionRuns = [], onChanged }:
 
   return (
     <div className="flex flex-col gap-4 p-4">
+      <AiCost usage={usage} />
       <div>
         <div className="flex items-center justify-between gap-2">
           <div className="font-medium">{run.workflow_name} <span className="text-ink-3">v{run.version}</span></div>
