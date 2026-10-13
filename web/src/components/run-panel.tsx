@@ -25,8 +25,9 @@ export interface Task { id: string; run_id: string; status: string; kind: string
 const ACTIVE = ['running', 'waiting_customer', 'waiting_approval', 'paused', 'failed'];
 
 // Every AI call of the conversation (routing, topic checks, steps, conditions, merged replies) and the totals.
-export interface AiCall { id: string; purpose: string; model: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; ms: number | null; created_at: string }
-export interface AiUsage { calls: AiCall[]; count: number; input_tokens: number; output_tokens: number; cost_usd: number; unpriced: string[] }
+// Costs are text, exactly as GTWY reported them (null when it sent none).
+export interface AiCall { id: string; purpose: string; model: string; input_tokens: number | null; output_tokens: number | null; cost_usd: string | null; ms: number | null; created_at: string }
+export interface AiUsage { calls: AiCall[]; count: number; input_tokens: number; output_tokens: number; cost_usd: string | null; no_cost: number }
 
 const k = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 const clock = (s: string) => new Date(s).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -42,11 +43,11 @@ function AiCost({ usage }: { usage?: AiUsage }) {
       <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs">
         <ChevronRight size={12} className="text-ink-3 transition-transform group-open:rotate-90" />
         <span className="text-ink-2">AI cost for this conversation</span>
-        <span className="ml-auto font-semibold tabular-nums text-ink">{usage.unpriced.length && !usage.cost_usd ? 'price not set' : usd(usage.cost_usd)}</span>
+        <span className="ml-auto font-semibold tabular-nums text-ink">{usd(usage.cost_usd)}</span>
         <span className="tabular-nums text-ink-3">· {usage.count} call{usage.count === 1 ? '' : 's'} · {k(usage.input_tokens + usage.output_tokens)} tokens</span>
       </summary>
-      {usage.unpriced.length > 0 && (
-        <div className="px-3 pb-1 text-[11px] text-warn">No price for {usage.unpriced.join(', ')}: those calls count as $0 (add it to server/src/llm/prices.ts).</div>
+      {usage.no_cost > 0 && (
+        <div className="px-3 pb-1 text-[11px] text-warn">GTWY sent no cost for {usage.no_cost} call{usage.no_cost === 1 ? '' : 's'}; the total leaves {usage.no_cost === 1 ? 'it' : 'them'} out.</div>
       )}
       <div className="max-h-56 overflow-auto border-t border-line text-[11px]">
         {usage.calls.map((c) => (
@@ -55,7 +56,7 @@ function AiCost({ usage }: { usage?: AiUsage }) {
             <span className="tabular-nums text-ink-3">{clock(c.created_at)}</span>
             <span className="truncate text-ink-2" title={c.model}>{PURPOSE[c.purpose] ?? c.purpose}</span>
             <span className="tabular-nums text-ink-3">{k(c.input_tokens ?? 0)} in · {k(c.output_tokens ?? 0)} out</span>
-            <span className="w-14 text-right font-medium tabular-nums text-ink">{usd(c.cost_usd)}</span>
+            <span className="text-right font-medium tabular-nums text-ink">{usd(c.cost_usd)}</span>
           </button>
         ))}
       </div>

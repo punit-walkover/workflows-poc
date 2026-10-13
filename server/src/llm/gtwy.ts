@@ -3,7 +3,6 @@ import axios from 'axios';
 import { Gtwy } from 'gtwy-sdk';
 import { config } from '../config';
 import { one, q } from '../db';
-import { priceOf } from './prices';
 
 const g = config.gtwy;
 let session: { token: string; exp: number } | null = null;
@@ -84,11 +83,11 @@ export async function chat(system: string, user: string, json: boolean, trace?: 
            ...(trace ? { gtwy: { thread_id: trace.thread, sub_thread_id: trace.sub } } : {}) };
 }
 
-// Every call is a row in llm_usage, with its request and reply. Cost is what GTWY reports, else tokens × prices.ts. Returns the cost.
+// Every call is a row in llm_usage, with its request and reply. Cost is exactly what GTWY reports (none if it sends none). Returns the cost.
 async function recordUsage(trace: Trace | undefined, usage: any, ms: number, exchange: object): Promise<number | null> {
   const model = `${g.service}/${g.model}`;
   const input = usage?.inputTokens ?? null, output = usage?.outputTokens ?? null;
-  const cost = typeof usage?.cost === 'number' ? usage.cost : priceOf(model, input, output);
+  const cost = typeof usage?.cost === 'number' ? usage.cost : null;
   const purpose = trace?.sub.split('-').find((p) => ['route', 'decide', 'case', 'compose', 'topic', 'reply'].includes(p)) ?? 'call';
   await q(`insert into llm_usage (conversation_id, purpose, model, input_tokens, output_tokens, cost_usd, ms, started_at, trace)
              values ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,

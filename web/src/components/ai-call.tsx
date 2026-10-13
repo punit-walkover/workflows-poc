@@ -7,7 +7,7 @@ import { JsonView } from './json-view';
 
 interface Round { round: number; request: unknown; response: any }
 interface AiCallDetail {
-  id: string; purpose: string; model: string; input_tokens: number | null; output_tokens: number | null; cost_usd: number | null; ms: number | null; started_at: string;
+  id: string; purpose: string; model: string; input_tokens: number | null; output_tokens: number | null; cost_usd: string | null; ms: number | null; started_at: string;
   trace: { rounds: Round[]; final_text: string | null } | null;
 }
 export const PURPOSE: Record<string, string> = { route: 'Routing', topic: 'Topic check', decide: 'Step', case: 'Condition', compose: 'Merge reply', reply: 'Free reply' };
