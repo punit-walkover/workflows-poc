@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImagePlus, Plus, Send, X } from 'lucide-react';
 import { api, API } from '@/lib/api';
 import { AttentionDot, Button, StatusChip } from '@/components/ui';
-import { AiUsage, ApprovalCard, EventRow, RunPanel, RunView, Task } from '@/components/run-panel';
+import { AiUsage, EventRow, RunPanel, RunView, Task } from '@/components/run-panel';
 import type { ActionRun } from '@/components/tool-call';
 
 interface Conv { id: string; customer_name: string; customer_email: string; channel: string; run_status: string | null; last_text: string | null; pending_approvals: number }
@@ -99,7 +99,6 @@ export default function PlaygroundPage() {
   );
 }
 
-type Item = { at: string; msg?: Msg; task?: Task };
 
 function Chat({ state, onChanged }: { state: State; onChanged: () => void }) {
   const [text, setText] = useState('');
@@ -110,11 +109,8 @@ function Chat({ state, onChanged }: { state: State; onChanged: () => void }) {
   const fileInput = useRef<HTMLInputElement>(null);
   const convId = state.conversation.id;
 
-  // Messages and approval requests in one timeline.
-  const items: Item[] = [
-    ...state.messages.map((m) => ({ at: m.created_at, msg: m })),
-    ...state.approvals.map((t) => ({ at: t.created_at, task: t })),
-  ].sort((a, b) => a.at.localeCompare(b.at));
+  // The chat shows messages only; teammates decide approvals on the Approvals page.
+  const items = state.messages;
   useEffect(() => { bottom.current?.scrollIntoView({ behavior: 'smooth' }); }, [items.length]);
 
   const last = state.messages.filter((m) => m.role !== 'system').at(-1);
@@ -154,19 +150,10 @@ function Chat({ state, onChanged }: { state: State; onChanged: () => void }) {
             {state.conversation.channel === 'widget' && <span className="ml-2 rounded bg-var-soft px-1.5 text-xs font-medium text-var">from embedded widget</span>}</div>
           <div className="text-xs text-ink-3">{state.conversation.customer_email} · write as the customer or the team; the right panel is the teammate view</div>
         </div>
-        {pending > 0 && <span className="flex items-center gap-2 rounded-full bg-bad-soft px-3 py-1 text-xs font-medium text-bad"><AttentionDot /> Needs approval</span>}
+        {pending > 0 && <a href="/approvals" className="flex items-center gap-2 rounded-full bg-bad-soft px-3 py-1 text-xs font-medium text-bad hover:underline"><AttentionDot /> Needs approval · open Approvals</a>}
       </header>
       <div className="flex-1 space-y-3 overflow-auto px-6 py-5">
-        {items.map(({ msg: m, task }) => {
-          if (task) return (
-            <div key={task.id} className="flex justify-start">
-              <div className="w-full max-w-[75%]">
-                <Label who="team" extra={task.status === 'pending' ? 'approval needed' : undefined} at={task.created_at} />
-                <ApprovalCard task={task} onDone={onChanged} />
-              </div>
-            </div>
-          );
-          if (!m) return null;
+        {items.map((m) => {
           if (m.role === 'system') return <div key={m.id} className="text-center text-xs text-ink-3">{m.text}</div>;
           return (
             <div key={m.id} className={`flex ${m.role === 'customer' ? 'justify-end' : 'justify-start'}`}>
@@ -235,7 +222,7 @@ function EmptyState() {
           <div className="mb-2 font-medium">Try it</div>
           <ul className="list-disc space-y-1 pl-5 text-ink-2">
             <li>Publish and enable a workflow, then write a message that matches its <i>When to use</i>.</li>
-            <li>Switch <b>Write as</b> to Team to reply as a teammate; approvals appear right in the chat.</li>
+            <li>Switch <b>Write as</b> to Team to reply as a teammate; approve requests on the <b>Approvals</b> page.</li>
             <li>The right panel shows each step, its tool calls and the run&apos;s timeline.</li>
           </ul>
         </div>
